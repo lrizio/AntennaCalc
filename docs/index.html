@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AntennaCalc - amateur radio antenna design</title>
+<link rel="icon" href="favicon.png">
+<style>
+:root{--bg:#14181d;--panel:#1a2027;--edge:#3a414c;--text:#eef3f8;--dim:#a7b3c0;--acc:#6cb6ff;--good:#57e39a}
+@media (prefers-color-scheme: light){:root{--bg:#eef2f5;--panel:#fff;--edge:#c3ced8;--text:#15232d;--dim:#566673;--acc:#0b7fa6;--good:#0f8a3a}}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 'Segoe UI',system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:2.4rem;letter-spacing:.18em;margin:.2em 0 0;color:var(--acc);font-weight:900}
+.sub{color:var(--dim);margin:0 0 1.2em}
+.btn{display:inline-block;background:var(--acc);color:#04121c;padding:.7em 1.3em;border-radius:8px;font-weight:700;text-decoration:none;margin:.3em .4em .3em 0}
+.btn.alt{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+img{max-width:100%;border:1px solid var(--edge);border-radius:8px;margin:.6em 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:14px 16px}
+h2{margin-top:1.8em;border-bottom:1px solid var(--edge);padding-bottom:.2em}
+small,.dim{color:var(--dim)}
+</style></head><body><main>
+<h1>ANTENNACALC</h1>
+<p class="sub">Design amateur-radio antennas to your requirements: band, gain, size and materials.</p>
+<a class="btn" href="https://github.com/lrizio/AntennaCalc/releases/latest">Download for Windows</a>
+<a class="btn alt" href="https://github.com/lrizio/AntennaCalc">Source on GitHub</a>
+<img src="guide/02_yagi_summary.png" alt="AntennaCalc summary of a 20 m Yagi design">
+
+<h2>What it does</h2>
+<div class="grid">
+<div class="card"><b>46 designs</b><br>HF wires, verticals, beams, compact and loaded antennas, VHF/UHF/satellite, microwave and receive-only types, chosen from drop-downs.</div>
+<div class="card"><b>Real simulation</b><br>A built-in thin-wire moment-method solver gives impedance, SWR sweep, gain, patterns and ground effects for your exact dimensions and materials.</div>
+<div class="card"><b>Gain target &amp; size limit</b><br>Beams choose their own element count. Auto-tune to resonance and an optimiser for gain and front-to-back.</div>
+<div class="card"><b>Build-ready output</b><br>Cut list in metres and feet/inches with weight, matching network values, multi-band table, PDF report and NEC-2 export.</div>
+</div>
+
+<h2>A look around</h2>
+<img src="guide/03_patterns.png" alt="Azimuth and elevation patterns">
+<img src="guide/05b_surface.png" alt="3-D pattern with the antenna drawn inside it">
+<img src="guide/04_swr.png" alt="SWR and impedance sweep">
+<img src="guide/08_multiband.png" alt="Multi-band table">
+
+<h2>Download and use</h2>
+<p>Download the zip from <a href="https://github.com/lrizio/AntennaCalc/releases/latest">Releases</a>, unzip it anywhere and run <b>AntennaCalc.exe</b>. Nothing is installed and the program makes no network connections. The User Guide PDF is in the zip. The exe is unsigned, so Windows SmartScreen may ask you to confirm.</p>
+
+<h2>Please note</h2>
+<p class="dim">Results are engineering estimates from simplified models; always trim on an antenna analyser. No warranty, not for safety-critical use, and antenna, mast and RF-exposure safety is your responsibility. See the <a href="https://github.com/lrizio/AntennaCalc/blob/main/DISCLAIMER.md">full disclaimer</a>. MIT licence. 73 de VK3EI.</p>
+</main></body></html>

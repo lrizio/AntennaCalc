@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.spec
+build_tmp/
+build_exe.log
+.pytest_cache/
+build/*.exe
