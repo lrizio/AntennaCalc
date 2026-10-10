@@ -120,3 +120,52 @@ def test_every_design_runs(key):
     m = res.metrics
     assert np.isfinite(m["gain_dbi"]) and np.isfinite(m["swr_f0"])
     assert res.design.dims
+
+
+# --------------------------------------------------------------------------- wire arrays (models_arrays)
+def _tuned(key, band, ex):
+    spec = REGISTRY[key]
+    e = {p.key: p.default for p in spec.params}
+    e.update(ex)
+    req = _req(spec, band)
+    sc = engine.tune(spec, req, e, {})
+    return engine.evaluate(spec, req, e, sc)
+
+
+def test_bobtail_beats_single_vertical_and_is_broadside():
+    band = "40 m (7.0-7.3 MHz)"
+    bob = _tuned("curtain", band, {"variant": "bobtail", "az": 0.0}).metrics
+    hsq = _tuned("curtain", band, {"variant": "halfsq", "az": 0.0}).metrics
+    gp = _tuned("gp", band, {"mount": "ground", "nburied": 16}).metrics
+    assert bob["gain_dbi"] - gp["gain_dbi"] > 3.0                  # known 3-4 dB over a vertical
+    assert bob["gain_dbi"] > hsq["gain_dbi"]
+    assert abs(bob["z_ant"].imag) < 20 and bob["z_ant"].real > 500   # voltage-fed, high impedance
+    assert min(bob["peak_az"] % 180, 180 - bob["peak_az"] % 180) < 8   # broadside to the top wire (north / south)
+
+
+def test_curtain_direction_follows_azimuth_setting():
+    m = _tuned("curtain", "40 m (7.0-7.3 MHz)", {"variant": "bobtail", "az": 90.0}).metrics
+    assert abs(((m["peak_az"] - 90) + 90) % 180 - 90) < 8
+
+
+def test_w8jk_is_end_fire_with_low_impedance():
+    m = _tuned("w8jk", "20 m (14.0-14.35 MHz)", {}).metrics
+    assert m["z_ant"].real < 25
+    # lobes lie along the spacing direction (north / south for az = 0)
+    assert min(m["peak_az"] % 180, 180 - m["peak_az"] % 180) < 10
+    assert m["gain_dbi"] > _tuned("dipole", "20 m (14.0-14.35 MHz)", {"shape": "flat"}).metrics["gain_dbi"] + 2.0
+
+
+def test_sterba_reflector_gives_front_to_back():
+    b = "20 m (14.0-14.35 MHz)"
+    free = _tuned("sterba", b, {"nsec": 3}).metrics
+    refl = _tuned("sterba", b, {"nsec": 3, "reflector": True}).metrics
+    assert refl["gain_dbi"] > free["gain_dbi"] + 1.0
+    assert refl["fb"] is not None and refl["fb"] > 8.0
+
+
+def test_bruce_gain_grows_with_sections():
+    b = "40 m (7.0-7.3 MHz)"
+    g3 = _tuned("bruce", b, {"n": 3}).metrics["gain_dbi"]
+    g6 = _tuned("bruce", b, {"n": 6}).metrics["gain_dbi"]
+    assert g6 > g3 + 2.0

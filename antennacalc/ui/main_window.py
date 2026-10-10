@@ -335,7 +335,7 @@ class MainWindow(QMainWindow):
         <h2>AntennaCalc</h2>
         <p>Design amateur-radio antennas to your requirements. Pick an antenna type, band, size and material on the left,
         then press <b>DESIGN</b> (F5).</p>
-        <ul><li><b>46 antenna designs</b> covering wires, verticals, beams, compact and loaded antennas, VHF/UHF/satellite,
+        <ul><li><b>50 antenna designs</b> covering wires, verticals, beams, compact and loaded antennas, VHF/UHF/satellite,
         microwave and receive-only types.</li>
         <li>Wire antennas are simulated with a built-in thin-wire moment-method solver: real impedance, SWR sweep, gain, pattern and ground effects.</li>
         <li>Set a <b>target gain</b> and <b>size limit</b> and beams choose their element count for you.</li>

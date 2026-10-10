@@ -263,6 +263,7 @@ def build():
         "Conductors thicker than about 2% of a wavelength, or very small features such as the inside of a trap or a tuning capacitor, are not modelled in detail.",
         "Traps, coils and loads are lumped ideal components with the Q you give.",
         "The 'phased array' and 'cross-Yagi / turnstile / eggbeater' designs assume an ideal feed network; the port impedances tell you what the real network must match.",
+        "The Sterba curtain and W8JK drive every section from an ideal in-phase (or anti-phase) source, so their feed impedance is the parallel combination - real open-wire phasing lines present several hundred ohms. The half-square, Bobtail and Bruce array are fed at one base against a radial system; the Bobtail and half-square feed point is several kilohms.",
         "Closed-form microwave models (dish, horn, patch, slot array) are estimates within a decibel or two; patch and slot patterns are simple approximations.",
         "Wire antennas near other conductors, buildings or trees, and the effect of masts, booms and insulators, are not included - trim on the air with an antenna analyser."]))
     s.append(callout("<b>Validation:</b> the half-wave dipole gives about 80 + j43 ohm and 2.12 dBi; a quarter-wave monopole over perfect ground gives half the dipole's impedance and 5.1 dBi; "
@@ -274,7 +275,8 @@ def build():
         ["Export report (PDF)", "File menu (Ctrl+P)", "Summary, requirement checks, cut list, patterns, SWR, geometry, matching and notes in one PDF."],
         ["Export NEC-2 deck", "File menu", "A .nec file with the wires, ground, loads, sources and transmission lines for 4nec2, EZNEC or xnec2c to cross-check the result."],
         ["Export cut list / sweep (CSV)", "File menu or the tab buttons", "Spreadsheet-ready tables."],
-        ["Theme", "View menu", "SHACK (dark) or DAYLIGHT (light)."]],
+        ["Theme", "View menu", "SHACK (dark) or DAYLIGHT (light)."],
+        ["Check for updates", "Help menu (tick)", "A few seconds after start the program asks GitHub whether a newer release exists. If so, an amber UPDATE vX.Y AVAILABLE button appears at the right of the status bar; click it to open the download page. Nothing is downloaded or installed for you and nothing is sent except the request itself. Untick to turn it off (for example when offline)."]],
         [1.8 * inch, 2.0 * inch, 3.4 * inch]))
     s.append(P("Keyboard shortcuts", style_h2))
     s.append(table([["Key", "Action"], ["F5", "Design"], ["F6", "Optimise (beams)"], ["Ctrl+S / Ctrl+O", "Save / open a design"],
