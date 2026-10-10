@@ -8,6 +8,7 @@ import numpy as np
 
 from .common import fmt_len
 from .engine import Result
+from . import VERSION
 from .mom import Model
 
 
@@ -17,9 +18,13 @@ def nec_deck(res: Result) -> str:
     if st is None or res.model is None:
         raise ValueError("This antenna uses a closed-form model - there is no wire geometry to export.")
     m: Model = res.model
-    lines = [f"CM AntennaCalc: {d.title}",
-             f"CM Design frequency {req.f_mhz:.5f} MHz",
+    g0 = st.ground
+    gtxt = {"free": "free space", "perfect": "perfect ground"}.get(g0.kind, f"real ground, sigma {g0.sigma:g} S/m, eps_r {g0.eps_r:g}")
+    lines = [f"CM AntennaCalc v{VERSION}: {d.title}",
+             f"CM Design frequency {req.f_mhz:.5f} MHz, band {req.f_lo:.4f}-{req.f_hi:.4f} MHz",
+             f"CM Conductor {req.material}, diameter {req.diameter_mm:.2f} mm; ground: {gtxt}",
              "CM Wire loading and source/load positions are approximations of the AntennaCalc model",
+             "CM Open in 4nec2 (File > Open > Nec-file) or any NEC-2 program; units are metres",
              "CE"]
     for wi, w in enumerate(st.wires):
         n = m.wire_n[wi]
@@ -59,7 +64,14 @@ def nec_deck(res: Result) -> str:
         sa = max(1, min(m.wire_n[wa], int(round(st.sources[a].at * m.wire_n[wa])) or 1))
         sb = max(1, min(m.wire_n[wb], int(round(st.sources[b].at * m.wire_n[wb])) or 1))
         lines.append(f"TL  {wa + 1:3d} {sa:3d} {wb + 1:3d} {sb:3d} {-z0 if crossed else z0:.4g} {ln:.5g} 0 0 0 0")
-    lines.append(f"FR  0 1 0 0 {f0:.5f} 0")
+    plain = not st.loads and not st.lines          # nothing frequency dependent, so a sweep is meaningful
+    if plain and req.f_hi > req.f_lo and d.mode == "single":
+        npts = 11
+        step = (req.f_hi - req.f_lo) / (npts - 1)
+        lines.append(f"CM Frequency sweep across the band (SWR plot in 4nec2); the pattern is computed at every step")
+        lines.append(f"FR  0 {npts} 0 0 {req.f_lo:.5f} {step:.5f}")
+    else:
+        lines.append(f"FR  0 1 0 0 {f0:.5f} 0")
     lines.append("RP  0 91 73 1000 0 0 2 5")
     lines.append("EN")
     return "\n".join(lines) + "\n"

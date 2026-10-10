@@ -248,3 +248,61 @@ def test_wide_sweep_option_covers_hf_and_leaves_the_design_unchanged():
     third = wide.swr_rig[(wide.f > 20.5) & (wide.f < 22.5)]
     assert third.min() < 3.0 * 2
     assert not REGISTRY["yagi"].wide_ok
+
+
+# --------------------------------------------------------------------------- NEC-2 deck export
+def _parse_nec(deck):
+    """Minimal NEC-2 reader (GW, GE, GN, LD 5, EX, FR) - enough to rebuild a plain wire design."""
+    wires, ground, sig, ex, fr, cards = [], Ground("free"), 5.8e7, [], None, []
+    for ln in deck.splitlines():
+        t = ln.split()
+        if not t:
+            continue
+        c = t[0]
+        cards.append(c)
+        if c == "GW":
+            wires.append((int(t[1]), int(t[2]), [float(x) for x in t[3:10]]))
+        elif c == "GN":
+            k = int(t[1])
+            ground = Ground("perfect") if k == 1 else Ground("real", float(t[6]), float(t[5])) if k == 0 else Ground("free")
+        elif c == "LD" and t[1] == "5":
+            sig = float(t[5])
+        elif c == "EX":
+            ex.append((int(t[2]), int(t[3]), complex(float(t[5]), float(t[6]))))
+        elif c == "FR":
+            fr = (int(t[2]), float(t[5]), float(t[6]))
+    return wires, ground, sig, ex, fr, cards
+
+
+@pytest.mark.parametrize("over", [{}, {"orient": "down", "feed": "corner"}, {"orient": "flat", "feed": "side"},
+                                  {"tilt": 25.0, "az": 40.0}])
+def test_delta_loop_nec_deck_round_trips(over):
+    from antennacalc import export
+    spec = REGISTRY["delta"]
+    e = {p.key: p.default for p in spec.params}
+    e.update(over)
+    req = _req(spec, "20 m (14.0-14.35 MHz)", height=8.0)
+    sc = engine.tune(spec, req, e, {})
+    res = engine.evaluate(spec, req, e, sc, do_sweep=False, do_bands=False)
+    deck = export.nec_deck(res)
+    wires, ground, sig, ex, fr, cards = _parse_nec(deck)
+    assert cards[:1] == ["CM"] and cards.index("CE") < cards.index("GW") < cards.index("GE") < cards.index("EX") < cards.index("FR")
+    assert cards[-1] == "EN" and "RP" in cards and len(ex) == 1 and len(wires) >= 3
+    assert fr[0] == 11 and fr[1] == pytest.approx(14.0)          # band sweep for the SWR plot
+    # a closed loop: every end point is shared by exactly one other wire
+    ends = {}
+    for tag, n, v in wires:
+        for p in (tuple(round(x, 3) for x in v[0:3]), tuple(round(x, 3) for x in v[3:6])):
+            ends[p] = ends.get(p, 0) + 1
+    assert all(c == 2 for c in ends.values())
+    # neighbouring segment lengths stay within NEC's 5:1 guideline
+    seglens = [math.dist(v[0:3], v[3:6]) / n for tag, n, v in wires]
+    assert max(seglens) / min(seglens) <= 5.0
+    # re-solve the deck with the solver: same feedpoint impedance as the design
+    st = Structure(ground=ground)
+    for tag, n, v in wires:
+        st.add(tuple(v[0:3]), tuple(v[3:6]), v[6], sigma=sig, nseg=n)
+    st.sources.append(Source(ex[0][0] - 1, (ex[0][1] - 0.5) / wires[ex[0][0] - 1][1]))
+    z = solve(Model(st, 1.0), req.f_mhz * 1e6).zin[0]
+    z0 = res.metrics["z_ant"]
+    assert abs(z - z0) / abs(z0) < 0.03

@@ -528,13 +528,20 @@ def b_delta(req, ex, sc):
         else:                               # apex down: the base is the top edge, the apex is the lowest point
             pts = [R(-s / 2, h * sn, H + h * c), R(s / 2, h * sn, H + h * c), R(0.0, 0.0, H)]
         base_note = f"{s:.2f} m equilateral triangle, {h:.2f} m high" + (f", tilted {math.degrees(tilt):.0f} deg" if tilt > 0 else "")
+    # segments stay close to the same length everywhere (NEC-2 wants neighbouring segments within about 5:1)
     if feed == "corner":
-        # a short way along the base from its first corner
-        ids, joints = add_polygon(st, pts, a, sg, gaps=[(0, 0.04, "feed")], min_seg=4)
+        # a one-segment feed wire right at the first corner (about a quarter of a normal segment long)
+        p0, p1, p2 = (np.array(q, float) for q in pts)
+        pf = p0 + (p1 - p0) * 0.06
+        w_feed = st.add(p0, pf, a, sigma=sg, nseg=1, name="feed")
+        st.add(pf, p1, a, sigma=sg, min_seg=2)
+        st.add(p1, p2, a, sigma=sg, min_seg=2)
+        st.add(p2, p0, a, sigma=sg, min_seg=2)
+        joints = {"feed": w_feed}
     elif feed == "side":
-        ids, joints = add_polygon(st, pts, a, sg, feed_edge=1, min_seg=4)
+        ids, joints = add_polygon(st, pts, a, sg, feed_edge=1, min_seg=2)
     else:
-        ids, joints = add_polygon(st, pts, a, sg, feed_edge=0, min_seg=4)
+        ids, joints = add_polygon(st, pts, a, sg, feed_edge=0, min_seg=2)
     st.sources.append(Source(joints["feed"], 1.0))
     d.pol = "mixed"
     d.tune = [TuneTarget("len", req.f_mhz, "x0", lo=0.8, hi=1.3, label="perimeter")]
