@@ -57,7 +57,33 @@ def shade(hex_color: str, amount: int) -> str:
     return f"#{c(r):02x}{c(g):02x}{c(b):02x}"
 
 
+def _arrow_icons(t: Theme) -> dict:
+    """Draw up/down arrow PNGs for the spin boxes (Qt stylesheets need image files for them)."""
+    import os
+    import tempfile
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter, QPolygonF
+    d = os.path.join(tempfile.gettempdir(), "antennacalc_arrows")
+    os.makedirs(d, exist_ok=True)
+    out = {}
+    for name, pts in (("up", [(1, 7), (5, 2), (9, 7)]), ("down", [(1, 2), (5, 7), (9, 2)]),
+                      ("left", [(7, 1), (2, 5), (7, 9)]), ("right", [(2, 1), (7, 5), (2, 9)])):
+        path = os.path.join(d, f"{name}_{t.name}.png")
+        img = QImage(10, 10, QImage.Format_ARGB32)
+        img.fill(0)
+        qp = QPainter(img)
+        qp.setRenderHint(QPainter.Antialiasing)
+        qp.setPen(Qt.NoPen)
+        qp.setBrush(QColor(t.text))
+        qp.drawPolygon(QPolygonF([QPointF(x, y) for x, y in pts]))
+        qp.end()
+        img.save(path)
+        out[name] = path.replace("\\", "/")
+    return out
+
+
 def stylesheet(t: Theme) -> str:
+    ar = _arrow_icons(t)
     return f"""
     QWidget {{ background: {t.bg}; color: {t.text}; font-family: 'Segoe UI', sans-serif; font-size: 13px; }}
     QLabel {{ background: transparent; }}
@@ -90,6 +116,15 @@ def stylesheet(t: Theme) -> str:
                            border: 1px solid {t.edge}; border-top: 2px solid {shade(t.btn_edge, -8)}; border-bottom: 1px solid {shade(t.edge, 28)}; border-radius: 5px;
                            padding: 3px 6px; min-height: 22px; }}
     QComboBox:hover, QDoubleSpinBox:hover, QSpinBox:hover {{ border-color: {t.accent_edge}; }}
+    QSpinBox, QDoubleSpinBox {{ padding-right: 24px; }}
+    QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: padding; subcontrol-position: top right; width: 20px; height: 14px;
+                           border-left: 1px solid {t.edge}; border-bottom: 1px solid {t.edge}; background: {t.btn}; }}
+    QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: padding; subcontrol-position: bottom right; width: 20px; height: 14px;
+                           border-left: 1px solid {t.edge}; background: {t.btn}; }}
+    QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {t.accent}; }}
+    QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed, QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {{ background: {t.accent_edge}; }}
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({ar["up"]}); width: 10px; height: 10px; }}
+    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({ar["down"]}); width: 10px; height: 10px; }}
     QComboBox QAbstractItemView {{ background: {t.panel}; selection-background-color: {t.accent}; border: 1px solid {t.edge}; }}
     QCheckBox {{ spacing: 6px; }}
     QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid {t.edge}; border-radius: 3px; background: {t.panel}; }}
@@ -102,9 +137,23 @@ def stylesheet(t: Theme) -> str:
     QHeaderView::section {{ background: {t.btn}; color: {t.text}; border: 0; padding: 5px; font-weight: 600; }}
     QTextBrowser {{ background: {t.panel}; border: 1px solid {t.btn_edge}; border-top: 2px solid {shade(t.btn_edge, -8)}; border-bottom: 1px solid {shade(t.edge, 28)}; border-radius: 6px; }}
     QScrollArea {{ border: 0; }}
-    QScrollBar:vertical {{ background: {t.bg}; width: 12px; }}
-    QScrollBar::handle:vertical {{ background: {t.edge}; border-radius: 5px; min-height: 24px; }}
-    QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
+    QScrollBar:vertical {{ background: {shade(t.bg, 22)}; width: 20px; margin: 20px 0 20px 0; border-left: 1px solid {t.accent_edge}; }}
+    QScrollBar::handle:vertical {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {shade(t.accent_edge, 30)}, stop:1 {shade(t.accent_edge, -20)});
+                                  border: 2px solid {t.text}; border-radius: 7px; min-height: 40px; margin: 1px; }}
+    QScrollBar::handle:vertical:hover {{ background: {shade(t.accent_edge, 45)}; }}
+    QScrollBar:horizontal {{ background: {shade(t.bg, 22)}; height: 20px; margin: 0 20px 0 20px; border-top: 1px solid {t.accent_edge}; }}
+    QScrollBar::handle:horizontal {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {shade(t.accent_edge, 30)}, stop:1 {shade(t.accent_edge, -20)});
+                                    border: 2px solid {t.text}; border-radius: 7px; min-width: 40px; margin: 1px; }}
+    QScrollBar::handle:horizontal:hover {{ background: {shade(t.accent_edge, 45)}; }}
+    QScrollBar::add-line:vertical {{ subcontrol-origin: margin; subcontrol-position: bottom; height: 20px; background: {t.btn}; border: 1px solid {t.edge}; }}
+    QScrollBar::sub-line:vertical {{ subcontrol-origin: margin; subcontrol-position: top; height: 20px; background: {t.btn}; border: 1px solid {t.edge}; }}
+    QScrollBar::add-line:horizontal {{ subcontrol-origin: margin; subcontrol-position: right; width: 20px; background: {t.btn}; border: 1px solid {t.edge}; }}
+    QScrollBar::sub-line:horizontal {{ subcontrol-origin: margin; subcontrol-position: left; width: 20px; background: {t.btn}; border: 1px solid {t.edge}; }}
+    QScrollBar::up-arrow:vertical {{ image: url({ar["up"]}); width: 10px; height: 10px; }}
+    QScrollBar::down-arrow:vertical {{ image: url({ar["down"]}); width: 10px; height: 10px; }}
+    QScrollBar::left-arrow:horizontal {{ image: url({ar["left"]}); width: 10px; height: 10px; }}
+    QScrollBar::right-arrow:horizontal {{ image: url({ar["right"]}); width: 10px; height: 10px; }}
+    QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
     QProgressBar {{ background: {t.panel}; border: 1px solid {t.edge}; border-radius: 5px; text-align: center; min-height: 16px; }}
     QProgressBar::chunk {{ background: {t.accent_edge}; border-radius: 4px; }}
     QMenuBar {{ background: {t.bg}; }}

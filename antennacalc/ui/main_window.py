@@ -104,6 +104,8 @@ class MainWindow(QMainWindow):
         split.setStretchFactor(1, 1)
         split.setSizes([380, 1180])
         self.setCentralWidget(split)
+        # children inherit the window's resize cursor otherwise, leaving it stuck as a double arrow
+        split.setCursor(Qt.ArrowCursor)
 
         self._build_tabs()
         self._build_menu()
@@ -115,9 +117,11 @@ class MainWindow(QMainWindow):
         hl.addWidget(self.titlebar)
         hl.addWidget(self.menuBar())
         self.setMenuWidget(holder)
+        holder.setCursor(Qt.ArrowCursor)
         self.setContentsMargins(5, 5, 5, 5)
         sb = QStatusBar()
         self.setStatusBar(sb)
+        sb.setCursor(Qt.ArrowCursor)
         self.ver_lbl = QLabel(f"AntennaCalc v{VERSION}  |  built-in thin-wire moment-method engine")
         self.ver_lbl.setObjectName("footer")
         sb.addPermanentWidget(self.ver_lbl)
@@ -636,6 +640,10 @@ class MainWindow(QMainWindow):
             self.setCursor(Qt.SizeVerCursor)
         else:
             self.unsetCursor()
+
+    def leaveEvent(self, ev):
+        self.unsetCursor()
+        super().leaveEvent(ev)
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton and not self.isMaximized():
