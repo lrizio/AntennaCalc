@@ -305,6 +305,10 @@ def build():
     s.append(Spacer(1, 6))
     s.append(P("Dipole / Inverted-V / Sloper, Moxon / Hex beam, Yagi / spider beam, Magnetic loop (a hybrid: wire simulation for the pattern, resonator model for the SWR), "
                "and the rubber-duck whip (a coil-loaded whip) are the entries that cover several named types or use a simplified representation; the Notes tab says exactly how."))
+    s.append(P("Several entries have a selector rather than a separate catalog line: the <b>Delta loop</b> covers apex up, apex down and horizontal (flat) triangles with a choice of "
+               "feed point (middle of the base, a corner, or a slanted side), a tilt for vertical loops and a broadside direction; the <b>Half-square / Bobtail curtain</b> covers the "
+               "2-vertical and 3-vertical arrays; and the <b>EFHW</b> offers a counterpoise style, transformer loss and compromise tuning across the harmonic bands. "
+               "On the HF wire antennas and verticals the <i>Sweep the whole HF range</i> tick box (Calculation section) shows SWR from 1.8 to 30 MHz."))
     s.append(PageBreak())
 
     # ------------------------------------------------------------------ method
