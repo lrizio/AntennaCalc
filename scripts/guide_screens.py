@@ -97,4 +97,51 @@ def trap(i):
 design("trap_dipole", trap)
 shot("11_trap.png", T["bands"])
 shot("11b_trap_dims.png", T["dims"])
+
+# ---- wire arrays added in v1.4.0 -------------------------------------------------------------
+def _band(label):
+    def f(i):
+        i.band.setCurrentText(label)
+    return f
+
+def _opt(i, **kw):
+    i.gain_on.setChecked(False); i.size_on.setChecked(False)      # state left over from the dish example
+    for k, (p, wd) in i.param_widgets.items():
+        if k in kw:
+            v = kw[k]
+            if hasattr(wd, "findData") and hasattr(wd, "setCurrentIndex") and not hasattr(wd, "setChecked"):
+                wd.setCurrentIndex(max(wd.findData(v), 0))
+            elif hasattr(wd, "setChecked"):
+                wd.setChecked(bool(v))
+            else:
+                wd.setValue(v)
+
+def bobtail(i):
+    i.band.setCurrentText("40 m (7.0-7.3 MHz)"); _opt(i, variant="bobtail")
+design("curtain", bobtail)
+shot("13_bobtail_patterns.png", T["patterns"])
+w.geo.set_view(35, 25)
+shot("13b_bobtail_geo.png", T["geo"])
+
+def bruce(i):
+    i.band.setCurrentText("40 m (7.0-7.3 MHz)"); _opt(i, n=6)
+design("bruce", bruce)
+shot("14_bruce_patterns.png", T["patterns"])
+w.geo.set_view(35, 25)
+shot("14b_bruce_geo.png", T["geo"])
+
+def sterba(i):
+    i.band.setCurrentText("20 m (14.0-14.35 MHz)"); _opt(i, nsec=4, reflector=True)
+design("sterba", sterba)
+shot("15_sterba_patterns.png", T["patterns"])
+w.geo.set_view(35, 25)
+shot("15b_sterba_geo.png", T["geo"])
+
+def w8jk(i):
+    i.gain_on.setChecked(False); i.size_on.setChecked(False)
+    i.band.setCurrentText("20 m (14.0-14.35 MHz)")
+design("w8jk", w8jk)
+shot("16_w8jk_patterns.png", T["patterns"])
+w.geo.set_view(35, 25)
+shot("16b_w8jk_geo.png", T["geo"])
 print("done")

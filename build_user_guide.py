@@ -226,6 +226,36 @@ def build():
     s.append(P("A dish for a 13 cm link", style_h2))
     s.append(P("Select <i>Microwave antennas - Parabolic dish</i>, band 13 cm, and enter a target gain. The dish diameter, focal length, depth and the feed illumination angle follow from the gain and the f/D ratio and aperture efficiency you set."))
     s.append(shot("10_dish.png", "Dish pattern for a 28 dBi target.", width=5.0 * inch))
+    s.append(P("Wire arrays: Bobtail, Bruce, Sterba and W8JK", style_h2))
+    s.append(P("Four arrays that get gain from phasing a few wires rather than from a boom. All are single-band; set the band first, then the options. "
+               "Each array has a <b>direction</b> setting: it is the compass bearing of the main lobe (broadside to the wires for the curtains and the Bruce array, along the line joining the elements for the W8JK). "
+               "Bidirectional arrays have a second lobe on the opposite bearing."))
+    s.append(P("Half-square / Bobtail curtain (Directional beams)", style_h3))
+    s.append(P("Quarter-wave verticals hung from half-wave top wires: two verticals for the half-square, three for the Bobtail. The array is fed at the base of one vertical against a radial system "
+               "(set the number of radials in <b>Antenna options</b>); the other lower ends are open and held at the <i>lower-end height</i>. The feed point is a voltage maximum, so expect several kilohms "
+               "(about 5.5 k&Omega; for the 40 m Bobtail) - the matching L-network is switched on by default. The 40 m Bobtail below gives 4.3 dBi at a 22 degree take-off, about 3.6 dB more than a single "
+               "ground-mounted vertical with the same radials; the half-square is about 0.8 dB lower."))
+    s.append(shot("13_bobtail_patterns.png", "Bobtail curtain on 40 m: two broadside lobes (north and south) at a low take-off angle.", width=4.8 * inch))
+    s.append(shot("13b_bobtail_geo.png", "Geometry: three verticals, the top wire, and the feed (red) at the base of the centre vertical.", width=4.4 * inch))
+    s.append(P("Bruce array (Directional beams)", style_h3))
+    s.append(P("One continuous wire folded into quarter-wave vertical and horizontal runs, end-fed against ground. The number of vertical sections (2 to 14) sets the gain, "
+               "and with a gain target and a width limit the program chooses it for you. Six sections on 40 m give about 6.6 dBi, bidirectional and broadside, with a feed resistance of a few hundred ohms "
+               "(the default 4:1 transformer brings it near 50 ohm). In a long end-fed Bruce the current falls toward the far end, so the two lobes become unequal."))
+    s.append(shot("14_bruce_patterns.png", "Six-section Bruce array on 40 m.", width=4.8 * inch))
+    s.append(shot("14b_bruce_geo.png", "Geometry: the folded wire, fed at the base of the first vertical.", width=4.4 * inch))
+    s.append(P("Sterba curtain (HF wire antennas)", style_h3))
+    s.append(P("Two rows, half a wavelength apart, of in-phase half-wave sections. Choose the number of sections per row (2 to 10; the program can pick it from a gain target) and, optionally, "
+               "a reflector curtain a quarter wavelength behind, which makes the pattern a single lobe. The example is a 4 x 2 curtain with reflector on 20 m at 10 m: 17.7 dBi at an 18 degree take-off, "
+               "about 10 dB front-to-back. The rows are driven by ideal in-phase sources, so the impedance shown is the parallel combination; a real curtain is fed through half-wave open-wire phasing lines "
+               "and shows several hundred ohms (see the notes). Height is that of the lower row."))
+    s.append(shot("15_sterba_patterns.png", "Sterba curtain, 4 x 2 sections with reflector, 20 m.", width=4.8 * inch))
+    s.append(shot("15b_sterba_geo.png", "Geometry: two rows of collinear sections, with the unfed reflector row behind.", width=4.4 * inch))
+    s.append(P("W8JK flat-top (Directional beams)", style_h3))
+    s.append(P("Two parallel horizontal dipoles fed out of phase: bidirectional end-fire along the line that joins them (north and south in the picture; the wires run east-west). "
+               "<b>Element spacing</b> (default 1/8 wavelength) and <b>element length</b> (0.5 to 0.7 wavelength) are the options. The feed point is only a few ohms at 1/8 wavelength spacing and rises "
+               "toward a quarter wavelength, so a matching network is needed. On 20 m at 12 m high the default gives 9.8 dBi, about 2 dB over a dipole at the same height, with the lobes along the spacing direction."))
+    s.append(shot("16_w8jk_patterns.png", "W8JK flat-top on 20 m at 12 m height.", width=4.8 * inch))
+    s.append(shot("16b_w8jk_geo.png", "Geometry: two parallel dipoles, each with its own feed point (fed together, out of phase).", width=4.4 * inch))
     s.append(PageBreak())
 
     # ------------------------------------------------------------------ catalog

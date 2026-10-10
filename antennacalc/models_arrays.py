@@ -235,7 +235,7 @@ def b_w8jk(req, ex, sc):
     d.dim("Height", 1, H, "")
     d.notes += ["Two close-spaced, anti-phase dipoles give bidirectional end-fire gain along the line that joins them; "
                 "the lobes point along the spacing direction, not along the wires.",
-                "Gain is about 3 dB over a dipole at 1/8 wavelength spacing and rises slightly at 1/4; it is a low-impedance array "
+                "Gain is roughly 2-3 dB over a dipole at the same height at 1/8 wavelength spacing and rises slightly at 1/4; it is a low-impedance array "
                 "(the feed point is a few tens of ohms with large reactance), so a matching network is needed.",
                 "Longer (about 0.625 wavelength) elements add roughly 1 dB and let the antenna work on its second harmonic band as well."]
     size_warn(d, req, 2 * half, "Element length")
