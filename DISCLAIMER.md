@@ -9,5 +9,5 @@ AntennaCalc is a hobby project by VK3EI, shared for the amateur-radio community.
 - **Limitation of liability.** The author is not liable for any loss, damage, injury, interference or licence breach arising from the use of the software or its output.
 - **Licence information is not legal advice.**
 - **Trademarks.** NEC, EZNEC, 4nec2 and other names are mentioned only to describe compatible file formats; there is no affiliation with their owners.
-- **Privacy.** AntennaCalc makes no network connections and sends nothing anywhere. Saved designs (`.antcalc`) and exports stay on your computer.
+- **Privacy.** AntennaCalc has no telemetry and no account. Its only network use is an optional update check: shortly after it starts it makes one small request to GitHub's public "latest release" record for this project (GitHub sees your IP address, as for any web request) and shows a notice if a newer version exists; nothing is downloaded or installed, and Help > Check for updates turns it off. Saved designs (`.antcalc`) and exports stay on your computer.
 - **Unsigned program.** The Windows download is not code-signed, so Windows SmartScreen may warn you. The full source is in this repository.

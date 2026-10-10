@@ -8,13 +8,14 @@ import os
 import sys
 
 import numpy as np
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QMarginsF, QSettings, Qt, QUrl
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QMarginsF, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QAction, QDesktopServices, QIcon, QPageLayout, QPageSize, QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (QSizePolicy, QScrollArea, QGraphicsDropShadowEffect, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QMainWindow, QMessageBox, QPushButton, QSplitter, QStatusBar, QTableWidget,
                                QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
 from .. import VERSION, engine, export, report
+from ..updatecheck import PAGE_URL, UpdateChecker
 from ..common import fmt_len
 from . import theme
 from .inputs import InputPanel
@@ -125,6 +126,17 @@ class MainWindow(QMainWindow):
         self.ver_lbl = QLabel(f"AntennaCalc v{VERSION}  |  built-in thin-wire moment-method engine")
         self.ver_lbl.setObjectName("footer")
         sb.addPermanentWidget(self.ver_lbl)
+        self.update_btn = QPushButton("")
+        self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.setStyleSheet("color: #ffbf5f; font-weight: 700; border: 0; background: transparent; padding: 0 8px;")
+        self.update_btn.hide()
+        sb.addPermanentWidget(self.update_btn)
+        self._update_url = PAGE_URL
+        self.update_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._update_url)))
+        self.updater = UpdateChecker(VERSION, self)
+        self.updater.found.connect(self._update_found)
+        if self.settings.value("check_updates", True, type=bool):    # one quiet look at GitHub after start
+            QTimer.singleShot(4000, self.updater.start)
 
         self.inputs.design_requested.connect(lambda: self.start_design(False))
         self.inputs.cancel_requested.connect(self.cancel)
@@ -292,6 +304,11 @@ class MainWindow(QMainWindow):
             v.addAction(a)
         h = mb.addMenu("&Help")
         a = QAction("User guide (PDF)", self); a.setShortcut("F1"); a.triggered.connect(self.open_guide); h.addAction(a)
+        a = QAction("Check for updates when the program starts", self); a.setCheckable(True)
+        a.setChecked(self.settings.value("check_updates", True, type=bool))
+        a.toggled.connect(lambda on: self.settings.setValue("check_updates", on))
+        a.setToolTip("Looks on GitHub for a newer release (one small request, nothing is downloaded).")
+        h.addAction(a)
         a = QAction("About AntennaCalc", self); a.triggered.connect(self.about); h.addAction(a)
 
     # ------------------------------------------------------------------ theme
@@ -610,6 +627,12 @@ class MainWindow(QMainWindow):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(p))
                 return
         QMessageBox.information(self, "AntennaCalc", "The user guide PDF was not found next to the program.")
+
+    def _update_found(self, version, url):
+        self._update_url = url
+        self.update_btn.setText(f"UPDATE v{version} AVAILABLE")
+        self.update_btn.setToolTip("A newer AntennaCalc is on GitHub. Click to open the download page.")
+        self.update_btn.show()
 
     def about(self):
         QMessageBox.about(self, "About AntennaCalc",
