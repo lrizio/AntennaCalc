@@ -57,6 +57,9 @@ def make_feed(design: Design, req: Requirements, zant_f0: complex | None = None)
     c = COAX[req.coax_key]
     ln = req.coax_len if req.coax_key != "none" else 0.0
     fc = FeedChain(line=design.line, ratio=ratio, coax=(c[1], c[2], c[3], ln), zref=req.zref)
+    if design.xfmr_loss_db > 0:
+        x = 1.0 - 10 ** (-design.xfmr_loss_db / 10.0)          # power fraction lost when the load is matched
+        fc.xfmr_g = (x / (1.0 - x)) / req.zref
     if req.lmatch and zant_f0 is not None:
         zin = zant_f0
         if design.line:
@@ -303,6 +306,36 @@ def _scan_root(tg, z_of, guess, tol):
     return brentq(f, xs[i], xs[i + 1], xtol=1e-5, maxiter=30)
 
 
+def _tune_swr_compromise(spec, req, ex, scales, tg, cancel=None):
+    """Scale `tg.key` so the mean log(SWR) over tg.freqs (at the rig, after the feed chain) is lowest."""
+    def cost(s):
+        if cancel and cancel():
+            raise Cancelled()
+        sc = dict(scales); sc[tg.key] = s
+        d = spec.builder(req, ex, sc)
+        m = build_model(d, req)
+        fc = make_feed(d, req)
+        tot = 0.0
+        for item in tg.freqs:                 # a band is (lo, centre, hi): the best point inside it counts
+            best = 1e9
+            for f in (item if isinstance(item, (tuple, list)) else (item,)):
+                z, _ = terminal_z(d, m, f)
+                best = min(best, math.log(min(swr_from_z(fc.apply(z, f)["zrig"], req.zref), 30.0)))
+            tot += best
+        return tot / len(tg.freqs)
+    xs = np.linspace(tg.lo, tg.hi, 21)
+    cs = np.array([cost(x) for x in xs])
+    i = int(np.argmin(cs))
+    lo, hi = xs[max(i - 1, 0)], xs[min(i + 1, len(xs) - 1)]
+    for _ in range(9):                        # golden-section refinement of the best bracket
+        a = lo + 0.382 * (hi - lo); b = lo + 0.618 * (hi - lo)
+        if cost(a) < cost(b):
+            hi = b
+        else:
+            lo = a
+    return float(0.5 * (lo + hi))
+
+
 def tune(spec: Spec, req: Requirements, ex: dict, scales: dict, progress=None, cancel=None) -> dict:
     scales = dict(scales)
     d0 = spec.builder(req, ex, scales)
@@ -316,6 +349,12 @@ def tune(spec: Spec, req: Requirements, ex: dict, scales: dict, progress=None, c
         for tg in d0.tune:
             if cancel and cancel():
                 raise Cancelled()
+            if tg.kind == "swr" and tg.freqs:
+                scales[tg.key] = _tune_swr_compromise(spec, req, ex, scales, tg, cancel)
+                done += 1
+                if progress:
+                    progress(done / total, f"Tuning {tg.label or tg.key} for all bands")
+                continue
 
             def z_of(s):
                 sc = dict(scales); sc[tg.key] = s
@@ -442,6 +481,7 @@ class Result:
     swr_feed: np.ndarray = None
     swr_line: np.ndarray = None
     coax_loss: np.ndarray = None
+    xfmr_loss: np.ndarray = None
     pattern: Pattern | None = None
     feed: FeedChain | None = None
     metrics: dict = field(default_factory=dict)
@@ -458,6 +498,8 @@ class Result:
 def sweep_freqs(design: Design, req: Requirements, n: int = 25) -> np.ndarray:
     if design.sweep_range:
         lo, hi = design.sweep_range
+        if design.sweep_points:
+            return np.linspace(lo, hi, design.sweep_points)
         return np.linspace(lo, hi, 41 if design.imp_override is not None else max(n, 21))
     width = req.f_hi - req.f_lo
     span = max(width * 2.0, 0.06 * req.f_mhz)
@@ -519,19 +561,19 @@ def _fill_sweep(res, design, req, fc, freqs, za):
     n = len(freqs)
     res.f = freqs
     res.zant = za
-    zf = np.zeros(n, complex); zr = np.zeros(n, complex); cl = np.zeros(n)
+    zf = np.zeros(n, complex); zr = np.zeros(n, complex); cl = np.zeros(n); xl = np.zeros(n)
     sl = np.zeros(n)
     for i, (f, z) in enumerate(zip(freqs, za)):
         if design.imp_override is not None:
             zf[i] = zr[i] = z
         else:
             o = fc.apply(z, f)
-            zf[i], zr[i], cl[i] = o["zfeed"], o["zrig"], o["coax_loss_db"]
+            zf[i], zr[i], cl[i], xl[i] = o["zfeed"], o["zrig"], o["coax_loss_db"], o["xfmr_loss_db"]
         if design.line:
             sl[i] = swr_from_z(z, design.line[0])
         else:
             sl[i] = swr_from_z(z, req.zref * (design.force_ratio or req.ratio))
-    res.zfeed, res.zrig, res.coax_loss = zf, zr, cl
+    res.zfeed, res.zrig, res.coax_loss, res.xfmr_loss = zf, zr, cl, xl
     res.swr_feed = np.array([swr_from_z(z, req.zref) for z in zf])
     res.swr_rig = np.array([swr_from_z(z, req.zref) for z in zr])
     res.swr_line = sl
@@ -564,6 +606,7 @@ def summarize(res: Result, z0: complex) -> dict:
     m["swr_feed_f0"] = float(res.swr_feed[i0])
     m["swr_line_f0"] = float(res.swr_line[i0])
     m["coax_loss_db"] = float(res.coax_loss[i0]) if res.coax_loss is not None else 0.0
+    m["xfmr_loss_db"] = float(res.xfmr_loss[i0]) if res.xfmr_loss is not None else 0.0
     m["gain_dbi"] = p.peak_db
     m["gain_dbd"] = p.peak_db - 2.15
     m["directivity"] = p.directivity

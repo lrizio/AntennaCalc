@@ -144,4 +144,28 @@ design("w8jk", w8jk)
 shot("16_w8jk_patterns.png", T["patterns"])
 w.geo.set_view(35, 25)
 shot("16b_w8jk_geo.png", T["geo"])
+
+# ---- EFHW wide sweep and delta loop (v1.5.0) ----------------------------------------------------
+def efhw80(i):
+    i.gain_on.setChecked(False); i.size_on.setChecked(False)
+    i.band.setCurrentText("80 m (3.5-4.0 MHz)")
+design("efhw", efhw80)
+shot("17_efhw_swr.png", T["swr"])
+shot("17b_efhw_bands.png", T["bands"])
+
+def delta_up(i):
+    i.gain_on.setChecked(False); i.size_on.setChecked(False)
+    i.band.setCurrentText("20 m (14.0-14.35 MHz)"); i.height.setValue(8.0)
+design("delta", delta_up)
+shot("18_delta_patterns.png", T["patterns"])
+w.geo.set_view(35, 25)
+shot("18b_delta_geo.png", T["geo"])
+
+def delta_down(i):
+    i.gain_on.setChecked(False); i.size_on.setChecked(False)
+    i.band.setCurrentText("20 m (14.0-14.35 MHz)"); i.height.setValue(8.0)
+    _opt(i, orient="down")
+design("delta", delta_down)
+w.geo.set_view(35, 25)
+shot("18c_delta_down_geo.png", T["geo"])
 print("done")

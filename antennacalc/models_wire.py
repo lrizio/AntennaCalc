@@ -8,7 +8,7 @@ import numpy as np
 from .common import COAX, BAND_BY_LABEL, band_short, HF_BAND_LABELS, BANDS
 from .design import Design, Param, Spec, TuneTarget, register
 from .mhelp import (add_polygon, band_choices, dipole_pair, hf_multiband, new_struct,
-                    regular_polygon, size_warn, trap_fn, eq_radius_note)
+                    regular_polygon, rotate_xy, size_warn, trap_fn, eq_radius_note)
 from .mom import C0, Load, Source
 
 
@@ -343,6 +343,17 @@ register(Spec("longwire", "Long wire / random wire", "HF wire antennas", b_longw
 
 
 # =========================================================================== EFHW / Zepp
+def _harmonic_bands(ffund, tol=0.03):
+    """HF amateur bands whose centre lies within `tol` of an integer multiple of the fundamental."""
+    out = []
+    for lab in HF_BAND_LABELS:
+        f = BAND_BY_LABEL[lab][3]
+        n = round(f / ffund)
+        if n >= 1 and abs(f / (n * ffund) - 1.0) <= tol:
+            out.append(f)
+    return out
+
+
 def b_efhw(req, ex, sc):
     ffund = P(ex, "fund", None) or req.f_mhz
     lam = C0 / (ffund * 1e6)
@@ -352,19 +363,44 @@ def b_efhw(req, ex, sc):
     H = req.height
     end_h = float(P(ex, "end_h", H))
     a, sg = req.radius, req.sigma
-    cp = float(P(ex, "cp", 0.05)) * lam
-    g = st.add((-cp, 0, H), (0, 0, H), a, sigma=sg, min_seg=3)
+    style = P(ex, "cp_style", "down")
+    cp = float(P(ex, "cp_m", 3.0))
+    if style == "inline":                   # collinear stub: really an off-centre-fed dipole on the harmonics
+        u = np.array([-1.0, 0.0, 0.0])
+    elif style == "angled":
+        u = np.array([-math.sqrt(0.5), 0.0, -math.sqrt(0.5)])
+    else:
+        u = np.array([0.0, 0.0, -1.0])
+    if u[2] < 0:
+        cp = min(cp, (H - 0.5) / -u[2])     # keep the lower end off the ground
+    cp = max(cp, 0.3)
+    far = np.array([0.0, 0.0, H]) + u * cp
+    g = st.add(tuple(far), (0, 0, H), a, sigma=sg, min_seg=3)
     st.add((0, 0, H), (L, 0, end_h), a, sigma=sg, min_seg=10)
     st.sources.append(Source(g, 1.0))
     d.pol = "H"
-    d.dim("Counterpoise", 1, cp, "short wire at the feed end (or the coax choke)")
-    d.tune = [TuneTarget("len", ffund, "x0", lo=0.9, hi=1.1, label="length")]
+    d.dim("Counterpoise", 1, cp, {"down": "hangs straight down from the feed end (stands in for the coax shield / a short wire)",
+                                  "angled": "slopes down and away from the radiator at 45 degrees",
+                                  "inline": "continues the radiator in a straight line"}.get(style, ""))
+    harm = _harmonic_bands(ffund)
+    comp = P(ex, "tune_for", "all") == "all" and len(harm) > 1
+    if comp:
+        d.tune = [TuneTarget("len", ffund, "swr", lo=0.9, hi=1.2, label="length (all harmonic bands)", freqs=harm)]
+    else:
+        d.tune = [TuneTarget("len", ffund, "x0", lo=0.9, hi=1.1, label="length")]
     d.multiband = hf_multiband(ffund * 0.95)
-    d.dim("Radiator", 1, L, f"half-wave on {ffund:.3f} MHz")
-    d.dim("Matching transformer", 1, None, "49:1 (or 64:1) unun at the feed end; small counterpoise or coax choke")
+    d.xfmr_loss_db = float(P(ex, "xfmr_db", 0.5))
+    d.dim("Radiator", 1, L, f"{'compromise length for the harmonic bands' if comp else 'half-wave on %.3f MHz' % ffund}")
+    d.dim("Matching transformer", 1, None, "49:1 (or 64:1) unun at the feed end; counterpoise stub or coax choke")
     d.notes += ["An EFHW has a very high feed impedance (2-5 kohm), hence the 49:1 or 64:1 transformer.",
-                "It works on the fundamental and its harmonics (e.g. 40/20/15/10 m for a 40 m wire).",
-                "A 0.05-0.1 wavelength counterpoise or the coax shield acts as the return; add a choke."]
+                "A bare wire cut for the fundamental has its harmonics a few percent high (about (n/2 - 0.025) wavelengths); the "
+                "'all harmonic bands' tuning lengthens the wire a little so the 40/20/15/10 m dips line up, at the cost of "
+                "the fundamental sitting slightly low. Trim on the air.",
+                "Real ununs have core loss and leakage, which cap the SWR peaks between the dips at roughly 5-8:1; the loss "
+                "setting models this as a shunt resistance (it also costs transmit power at resonance).",
+                "The counterpoise is the coax shield or a short wire; hanging it away from the radiator keeps the harmonics "
+                "evenly spaced. A collinear stub makes the antenna an off-centre-fed dipole on the higher bands.",
+                "Use a common-mode choke on the coax; the coax shield carries part of the antenna current."]
     size_warn(d, req, L, "Wire")
     return d
 
@@ -372,7 +408,12 @@ def b_efhw(req, ex, sc):
 register(Spec("efhw", "End-fed half-wave (EFHW)", "HF wire antennas", b_efhw,
               params=[Param("fund", "Cut for fundamental band", "choice", None, choices=band_choices("(same as design band)", hf_only=True)),
                       Param("end_h", "Far end height", "float", 10.0, 1, 40, 0.5, unit="m"),
-                      Param("cp", "Counterpoise length", "float", 0.05, 0.0, 0.25, 0.01, unit="wavelengths")],
+                      Param("tune_for", "Tune the length for", "choice", "all",
+                            choices=[("All harmonic bands (compromise)", "all"), ("Fundamental band only", "fund")]),
+                      Param("cp_m", "Counterpoise length", "float", 3.0, 0.3, 20, 0.5, unit="m"),
+                      Param("cp_style", "Counterpoise runs", "choice", "down",
+                            choices=[("Hanging down", "down"), ("Angled down and away", "angled"), ("In line with the wire", "inline")]),
+                      Param("xfmr_db", "Transformer loss (matched)", "float", 0.5, 0.0, 3.0, 0.1, unit="dB")],
               desc="Half-wave wire fed at the end through a 49:1 transformer; works on harmonically related bands.",
               feed_ratio=49.0, size_label="Max wire length"))
 
@@ -456,6 +497,74 @@ def b_hloop(req, ex, sc):
 register(Spec("hloop", "Horizontal loop / skywire (full-wave)", "HF wire antennas", b_hloop,
               params=[Param("shape", "Shape", "choice", "square", choices=[("Square", "square"), ("Triangle (delta)", "delta"), ("Circle (16-sided)", "circle")])],
               desc="Full-wavelength closed loop in a horizontal plane.", feed_ratio=2.0, size_label="Max span"))
+
+
+# =========================================================================== delta loop
+def b_delta(req, ex, sc):
+    lam = req.lam
+    orient = P(ex, "orient", "up")
+    feed = P(ex, "feed", "base")
+    tilt = math.radians(float(P(ex, "tilt", 0.0)))
+    az = float(P(ex, "az", 0.0))
+    names = {"up": "apex up", "down": "apex down", "flat": "horizontal"}
+    d = Design("delta", f"Delta loop ({names.get(orient, orient)})")
+    st = new_struct(req, d)
+    a, sg = req.radius, req.sigma
+    per = 1.02 * lam * _sc(sc, "len")
+    s = per / 3.0
+    h = s * math.sqrt(3.0) / 2.0
+    H = req.height
+
+    def R(x, y, z):
+        return rotate_xy((x, y, z), -az)
+
+    if orient == "flat":
+        pts = [R(-s / 2, -h / 3, H), R(s / 2, -h / 3, H), R(0.0, 2 * h / 3, H)]
+        base_note = f"{s:.2f} m equilateral triangle in a horizontal plane"
+    else:
+        c, sn = math.cos(tilt), math.sin(tilt)
+        if orient == "up":                  # base at the bottom, apex above (tilted loops lean toward +y)
+            pts = [R(-s / 2, 0.0, H), R(s / 2, 0.0, H), R(0.0, h * sn, H + h * c)]
+        else:                               # apex down: the base is the top edge, the apex is the lowest point
+            pts = [R(-s / 2, h * sn, H + h * c), R(s / 2, h * sn, H + h * c), R(0.0, 0.0, H)]
+        base_note = f"{s:.2f} m equilateral triangle, {h:.2f} m high" + (f", tilted {math.degrees(tilt):.0f} deg" if tilt > 0 else "")
+    if feed == "corner":
+        # a short way along the base from its first corner
+        ids, joints = add_polygon(st, pts, a, sg, gaps=[(0, 0.04, "feed")], min_seg=4)
+    elif feed == "side":
+        ids, joints = add_polygon(st, pts, a, sg, feed_edge=1, min_seg=4)
+    else:
+        ids, joints = add_polygon(st, pts, a, sg, feed_edge=0, min_seg=4)
+    st.sources.append(Source(joints["feed"], 1.0))
+    d.pol = "mixed"
+    d.tune = [TuneTarget("len", req.f_mhz, "x0", lo=0.8, hi=1.3, label="perimeter")]
+    d.dim("Total wire (perimeter)", 1, per, base_note)
+    d.dim("Sides", 3, s, "equal; a full wavelength of wire in all")
+    d.dim("Loop height" if orient != "flat" else "Loop depth", 1, h, "")
+    d.dim("Feed point", 1, None, {"base": "middle of the base wire", "corner": "close to a lower/base corner",
+                                  "side": "middle of a slanted side"}[feed] +
+          "; 1:1 balun, or a 75 ohm quarter-wave transformer / 2:1 unun for a 50 ohm match")
+    d.notes += ["A full-wave loop has a feedpoint impedance of roughly 100-130 ohm; a 75 ohm quarter-wave section or a 2:1 transformer gives a good 50 ohm match.",
+                "Apex-up with the feed in the middle of the base gives mainly horizontal polarisation; feeding at a corner or in a side shifts "
+                "it toward vertical (check the Patterns tab, polarisation overlay).",
+                "A vertical-plane loop radiates broadside, in both directions through the loop; the 'direction' setting is the compass bearing of one lobe.",
+                "Apex down puts the high-current base on top and the low-current apex near the ground, which narrows the pattern slightly and helps "
+                "low-angle radiation over poor ground.",
+                "A flat (horizontal) loop at low height is a high-angle (NVIS) radiator."]
+    size_warn(d, req, s, "Loop width")
+    return d
+
+
+register(Spec("delta", "Delta loop (full-wave triangle, selectable orientation)", "HF wire antennas", b_delta,
+              params=[Param("orient", "Orientation", "choice", "up",
+                            choices=[("Apex up (base at the bottom)", "up"), ("Apex down (base at the top)", "down"),
+                                     ("Horizontal (flat triangle)", "flat")]),
+                      Param("feed", "Feed point", "choice", "base",
+                            choices=[("Middle of the base", "base"), ("Corner (near the base end)", "corner"), ("Middle of a slanted side", "side")]),
+                      Param("tilt", "Tilt of the loop plane from vertical", "float", 0.0, 0, 80, 5, unit="deg"),
+                      Param("az", "Direction (azimuth, broadside)", "float", 0.0, 0, 359, 5, unit="deg")],
+              desc="Full-wavelength triangular loop in a vertical or horizontal plane, apex up or down, with a choice of feed point.",
+              height_default=6.0, height_label="Height of the lowest point", size_label="Max side length", feed_ratio=2.0))
 
 
 # =========================================================================== Lazy-H

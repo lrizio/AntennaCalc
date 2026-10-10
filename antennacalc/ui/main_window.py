@@ -335,7 +335,7 @@ class MainWindow(QMainWindow):
         <h2>AntennaCalc</h2>
         <p>Design amateur-radio antennas to your requirements. Pick an antenna type, band, size and material on the left,
         then press <b>DESIGN</b> (F5).</p>
-        <ul><li><b>50 antenna designs</b> covering wires, verticals, beams, compact and loaded antennas, VHF/UHF/satellite,
+        <ul><li><b>51 antenna designs</b> covering wires, verticals, beams, compact and loaded antennas, VHF/UHF/satellite,
         microwave and receive-only types.</li>
         <li>Wire antennas are simulated with a built-in thin-wire moment-method solver: real impedance, SWR sweep, gain, pattern and ground effects.</li>
         <li>Set a <b>target gain</b> and <b>size limit</b> and beams choose their element count for you.</li>
@@ -501,6 +501,8 @@ class MainWindow(QMainWindow):
         req = res.req
         sw = np.clip(sw, 1.0, 20.0)
         band = (req.f_lo, req.f_hi) if req.f_hi > req.f_lo else None
+        if res.design.shade_bands:
+            band = list(res.design.shade_bands)
         self.swr_plot.set_series([("SWR", res.f, sw, "c1")], vlines=[(req.f_mhz, "f0", "good")],
                                  hlines=[(2.0, "2:1", "warn"), (1.5, "1.5:1", "good")], band=band, ylim=(1.0, 10.0), logy=True)
         z = res.zfeed

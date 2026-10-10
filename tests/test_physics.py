@@ -13,6 +13,7 @@ def _req(spec, band="20 m (14.0-14.35 MHz)", **kw):
     b = BAND_BY_LABEL[band]
     r = Requirements(f_mhz=b[3], f_lo=b[1], f_hi=b[2], band_label=band, radius=1e-3, height=spec.height_default)
     r.ratio, r.coax_key, r.coax_len = spec.feed_ratio, spec.feed_coax, spec.feed_len
+    r.wide_sweep = spec.wide_default
     for k, v in kw.items():
         setattr(r, k, v)
     return r
@@ -83,8 +84,8 @@ def test_gain_target_picks_element_count():
 
 
 def test_efhw_high_impedance_with_transformer():
-    spec = REGISTRY["efhw"]; ex = {"fund": None, "end_h": 10.0, "cp": 0.05}
-    req = _req(spec)
+    spec = REGISTRY["efhw"]; ex = {"fund": None, "end_h": 10.0, "tune_for": "fund"}
+    req = _req(spec, wide_sweep=False)
     sc = engine.tune(spec, req, ex, {})
     res = engine.evaluate(spec, req, ex, sc, do_sweep=False)
     assert res.metrics["z_ant"].real > 800
@@ -169,3 +170,81 @@ def test_bruce_gain_grows_with_sections():
     g3 = _tuned("bruce", b, {"n": 3}).metrics["gain_dbi"]
     g6 = _tuned("bruce", b, {"n": 6}).metrics["gain_dbi"]
     assert g6 > g3 + 2.0
+
+
+# --------------------------------------------------------------------------- EFHW harmonic comb / transformer loss
+def _efhw_sweep(ex):
+    spec = REGISTRY["efhw"]
+    e = {p.key: p.default for p in spec.params}
+    e.update(ex)
+    req = _req(spec, "80 m (3.5-4.0 MHz)")
+    sc = engine.tune(spec, req, e, {})
+    res = engine.evaluate(spec, req, e, sc, do_bands=False)
+    return res
+
+
+def _swr_at(res, f):
+    return float(res.swr_rig[int(np.argmin(np.abs(res.f - f)))])
+
+
+def test_efhw_compromise_length_puts_harmonic_bands_on_target():
+    res = _efhw_sweep({})                       # all harmonic bands, hanging counterpoise, 0.5 dB unun
+    for f in (7.1, 14.15, 21.2, 28.5):          # 40 / 20 / 15 / 10 m
+        assert _swr_at(res, f) < 2.6, f
+    fund = _efhw_sweep({"tune_for": "fund"})    # fundamental-only tuning leaves the harmonics high
+    assert _swr_at(fund, 3.6) < 2.0
+    assert _swr_at(fund, 14.15) > 4.0
+
+
+def test_efhw_transformer_loss_caps_the_swr_peaks():
+    lossless = _efhw_sweep({"xfmr_db": 0.0})
+    lossy = _efhw_sweep({"xfmr_db": 1.0})
+    assert lossy.swr_rig.max() < 0.8 * lossless.swr_rig.max()
+    assert lossy.metrics["xfmr_loss_db"] > 0.3
+
+
+# --------------------------------------------------------------------------- delta loop
+def _delta(ex, height=8.0):
+    spec = REGISTRY["delta"]
+    e = {p.key: p.default for p in spec.params}
+    e.update(ex)
+    req = _req(spec, "20 m (14.0-14.35 MHz)", height=height)
+    sc = engine.tune(spec, req, e, {})
+    return engine.evaluate(spec, req, e, sc, do_sweep=False, do_bands=False)
+
+
+def test_delta_loop_resonates_near_a_wavelength_and_feeds_about_100_ohm():
+    res = _delta({})
+    z = res.metrics["z_ant"]
+    assert abs(z.imag) < 3.0 and 90 < z.real < 150
+    per = res.design.total_wire_m()
+    assert 1.02 < per / (299.792458 / 14.15) < 1.10
+
+
+def test_delta_loop_orientation_and_feed_point_change_the_pattern():
+    up = _delta({"orient": "up"}).pattern
+    flat = _delta({"orient": "flat"}).pattern
+    corner = _delta({"orient": "up", "feed": "corner"}).pattern
+    assert flat.takeoff > up.takeoff + 8.0                              # flat loop is a high-angle radiator
+    assert corner.comp_peak["vertical"] > up.comp_peak["vertical"] + 1.5   # corner feed adds vertical polarisation
+    assert up.comp_peak["horizontal"] > corner.comp_peak["horizontal"] + 2.0
+
+
+# --------------------------------------------------------------------------- whole-HF sweep option
+def test_wide_sweep_option_covers_hf_and_leaves_the_design_unchanged():
+    spec = REGISTRY["dipole"]
+    assert spec.wide_ok and not spec.wide_default
+    ex = {p.key: p.default for p in spec.params}
+    band = "40 m (7.0-7.3 MHz)"
+    req = _req(spec, band)
+    sc = engine.tune(spec, req, ex, {})
+    narrow = engine.evaluate(spec, req, ex, sc, do_bands=False)
+    req2 = _req(spec, band, wide_sweep=True)
+    wide = engine.evaluate(spec, req2, ex, sc, do_bands=False)
+    assert abs(wide.f[0] - 1.8) < 1e-6 and abs(wide.f[-1] - 30.0) < 1e-6 and len(wide.f) > 250
+    assert wide.design.shade_bands and len(wide.design.shade_bands) == 10
+    assert abs(wide.metrics["swr_f0"] - narrow.metrics["swr_f0"]) < 0.3
+    # a 40 m dipole is also resonant on its odd harmonics: a low SWR dip near 21 MHz
+    third = wide.swr_rig[(wide.f > 20.5) & (wide.f < 22.5)]
+    assert third.min() < 3.0 * 2
+    assert not REGISTRY["yagi"].wide_ok

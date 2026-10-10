@@ -8,7 +8,7 @@ from typing import Callable
 
 import numpy as np
 
-from .common import COAX, swr_from_z
+from .common import BAND_BY_LABEL, COAX, HF_BAND_LABELS, swr_from_z
 from .mom import C0, Ground, Structure
 
 
@@ -38,6 +38,7 @@ class Requirements:
     spw: int = 20                         # segments per wavelength
     auto_tune: bool = True
     optimize: bool = False
+    wide_sweep: bool = False              # sweep the whole HF range (1.8-30 MHz) instead of just the band
 
     @property
     def lam(self) -> float:
@@ -71,12 +72,13 @@ class Dim:
 class TuneTarget:
     key: str
     f_mhz: float
-    kind: str = "x0"           # x0 (zero reactance) | r (match resistance to target)
+    kind: str = "x0"           # x0 (zero reactance) | r (match resistance to target) | swr (best compromise over `freqs`)
     target: float = 50.0
     lo: float = 0.5
     hi: float = 1.8
     port: int = 0
     label: str = ""
+    freqs: list | None = None  # MHz, for kind "swr"
 
 
 @dataclass
@@ -89,6 +91,7 @@ class FeedChain:
     zref: float = 50.0
     lmatch_enabled: bool = False
     lmatch_f0: float = 0.0
+    xfmr_g: float = 0.0                # shunt conductance (S) across the transformer's 50 ohm side (core loss)
 
     # transmission line transform with loss
     @staticmethod
@@ -137,6 +140,12 @@ class FeedChain:
         out["zline_in"] = z
         z = self._lm(z, f_mhz)
         z = z / self.ratio
+        xl = 0.0
+        if self.xfmr_g > 0:
+            y = 1 / z + self.xfmr_g
+            xl = -10 * math.log10(max(1e-6, 1 - self.xfmr_g / y.real)) if y.real > 0 else 0.0
+            z = 1 / y
+        out["xfmr_loss_db"] = xl
         out["zfeed"] = z
         loss = 0.0
         if self.coax[3] > 0:
@@ -210,6 +219,9 @@ class Design:
     seg_len_hint: float | None = None
     opt_keys: list = field(default_factory=list)     # [(scale_key, lo, hi)] for the optimiser
     ground_note: str = ""
+    xfmr_loss_db: float = 0.0              # matching-transformer loss at a matched load (EFHW unun)
+    sweep_points: int | None = None        # override the SWR sweep point count
+    shade_bands: list | None = None        # [(f_lo, f_hi)] amateur bands to shade on the SWR plot
 
     def dim(self, item, qty=1, length_m=None, note=""):
         self.dims.append(Dim(item, qty, length_m, note))
@@ -256,6 +268,37 @@ class Spec:
     size_fn: Callable | None = None        # (req, ex, n) -> size in metres for the size limit
     custom_range: bool = False             # wideband: uses the editable frequency range
     optimize_default: bool = False
+    wide_ok: bool = False                  # offers the whole-HF-range SWR sweep
+    wide_default: bool = False
+
+
+HF_SWEEP = (1.8, 30.0)
+HF_SWEEP_STEP = 0.1
+
+
+def apply_wide_sweep(design: "Design", req: "Requirements"):
+    """Whole-HF SWR sweep: 1.8-30 MHz every 0.1 MHz with the amateur bands shaded."""
+    if not getattr(req, "wide_sweep", False) or design.analytic is not None or design.structure is None:
+        return design
+    lo, hi = HF_SWEEP
+    design.sweep_range = (lo, hi)
+    design.sweep_points = int(round((hi - lo) / HF_SWEEP_STEP)) + 1
+    design.shade_bands = [(BAND_BY_LABEL[b][1], BAND_BY_LABEL[b][2]) for b in HF_BAND_LABELS]
+    return design
+
+
+def enable_wide_sweep(spec: "Spec", default: bool = False):
+    """Mark a spec as supporting the whole-HF sweep and wrap its builder so every code path (tune, design,
+    band table, optimiser) sees the same sweep range and segment size."""
+    if spec.wide_ok:
+        return
+    inner = spec.builder
+
+    def builder(req, ex, sc, _inner=inner):
+        return apply_wide_sweep(_inner(req, ex, sc), req)
+    spec.builder = builder
+    spec.wide_ok = True
+    spec.wide_default = default
 
 
 REGISTRY: dict[str, Spec] = {}

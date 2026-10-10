@@ -252,8 +252,12 @@ class LinePlot(QWidget):
         def Y(v):
             return r.bottom() - (self._ty(v) - ty0) / (ty1 - ty0) * r.height()
         if self.band:
-            p.fillRect(QRectF(X(self.band[0]), r.top(), max(X(self.band[1]) - X(self.band[0]), 2), r.height()),
-                       QColor(t.accent_edge).lighter(100) if False else QColor(108, 182, 255, 28))
+            bands = self.band if isinstance(self.band, list) else [self.band]
+            for b0, b1 in bands:
+                if b1 < x0 or b0 > x1:
+                    continue
+                p.fillRect(QRectF(X(max(b0, x0)), r.top(), max(X(min(b1, x1)) - X(max(b0, x0)), 2), r.height()),
+                           QColor(108, 182, 255, 28 if len(bands) == 1 else 46))
         grid = QPen(QColor(t.grid)); grid.setWidthF(1)
         xt, _ = _nice_ticks(x0, x1, 7)
         for v in xt:

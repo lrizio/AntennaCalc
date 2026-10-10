@@ -146,6 +146,8 @@ def summary_table(res: Result, spec: Spec) -> list:
         if d.line:
             rows.append(("SWR on the feeder line", f"{m['swr_line_f0']:.2f} : 1 (line impedance {d.line[0]:.0f} ohm)"))
         rows.append(("Coax loss", f"{m['coax_loss_db']:.2f} dB at {req.f_mhz:.4g} MHz"))
+        if d.xfmr_loss_db > 0:
+            rows.append(("Transformer loss", f"{m['xfmr_loss_db']:.2f} dB at {req.f_mhz:.4g} MHz (rated {d.xfmr_loss_db:.1f} dB when matched)"))
         rows.append((f"At {req.power_w:.0f} W: feedpoint current / voltage", f"{m['feed_i']:.2f} A rms / {m['feed_v']:.0f} V rms"))
     mk = mass_kg(res)
     if mk is not None:
@@ -166,7 +168,8 @@ def matching_html(res: Result) -> str:
         stages.append(_lm_text(kind, se, sh, " (automatic L network, values fixed at the design frequency)"))
     ratio = d.force_ratio or req.ratio
     if ratio != 1.0:
-        stages.append(f"Transformer {ratio:g}:1 (antenna side {req.zref * ratio:.0f} ohm to {req.zref:.0f} ohm).")
+        stages.append(f"Transformer {ratio:g}:1 (antenna side {req.zref * ratio:.0f} ohm to {req.zref:.0f} ohm)"
+                      + (f", loss {d.xfmr_loss_db:.1f} dB when matched." if d.xfmr_loss_db > 0 else "."))
     if fc and fc.coax[3] > 0:
         stages.append(f"Coax: {fc.coax[0]:.0f} ohm, {fc.coax[3]:.1f} m, loss {m['coax_loss_db']:.2f} dB.")
     out.append("<ol>" + "".join(f"<li>{s}</li>" for s in stages) + "</ol>" if stages else "<p>Direct connection (no matching network).</p>")

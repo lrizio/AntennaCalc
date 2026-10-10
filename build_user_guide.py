@@ -161,7 +161,9 @@ def build():
         ["Transformer, Coax, Length, System impedance", "Feed system between the antenna and the transmitter. Ratios such as 4:1, 9:1 and 49:1 are the common baluns and ununs. Coax loss is included in the SWR seen at the transmitter."],
         ["Automatic L-match", "Adds an ideal L-network at the feedpoint, calculated at the design frequency, so the antenna is matched to your system impedance. The values appear on the Matching tab."],
         ["Antenna options", "Settings special to the chosen design (number of radials, element count, traps, termination resistor, windings sense, and so on)."],
-        ["Calculation", "Fast / Normal / Fine controls the number of wire segments per wavelength. Auto-tune trims lengths to resonance; Optimise (beams) refines spacings and lengths."]],
+        ["Calculation", "Fast / Normal / Fine controls the number of wire segments per wavelength. Auto-tune trims lengths to resonance; Optimise (beams) refines spacings and lengths. "
+         "<b>Sweep the whole HF range</b> (HF wire antennas and verticals) plots SWR and impedance from 1.8 to 30 MHz with the amateur bands shaded, "
+         "so harmonic and multi-band behaviour is visible; it is on by default for the EFHW and takes a few seconds longer."]],
         [1.9 * inch, 5.3 * inch]))
     s.append(Spacer(1, 6))
     s.append(callout("<b>Tip:</b> change one thing at a time and press DESIGN again; most designs finish in a second or two. "
@@ -256,6 +258,34 @@ def build():
                "toward a quarter wavelength, so a matching network is needed. On 20 m at 12 m high the default gives 9.8 dBi, about 2 dB over a dipole at the same height, with the lobes along the spacing direction."))
     s.append(shot("16_w8jk_patterns.png", "W8JK flat-top on 20 m at 12 m height.", width=4.8 * inch))
     s.append(shot("16b_w8jk_geo.png", "Geometry: two parallel dipoles, each with its own feed point (fed together, out of phase).", width=4.4 * inch))
+    s.append(P("End-fed half-wave on several bands (HF wire antennas)", style_h2))
+    s.append(P("An EFHW cut for 80 m also resonates near its harmonics, so one wire can serve 80, 40, 20, 15 and 10 m through a 49:1 transformer. "
+               "AntennaCalc sweeps the whole HF range (the amateur bands are shaded) so you can see the evenly spaced dips, and offers these options:"))
+    s.append(bullets([
+        "<b>Tune the length for</b> - <i>All harmonic bands</i> (the default) lengthens the wire slightly so the 40/20/15/10 m dips fall on the bands, "
+        "at the cost of the 80 m dip sitting a little low; <i>Fundamental band only</i> centres the lowest band and leaves the harmonics a few percent high.",
+        "<b>Counterpoise</b> - length and direction of the return wire (the coax shield or a short wire). Hanging it down or away keeps the dips evenly spaced; "
+        "in line with the radiator turns the antenna into an off-centre-fed dipole on the higher bands.",
+        "<b>Transformer loss</b> - core loss of the 49:1 unun (default 0.5 dB when matched). It is what holds the SWR peaks between the dips to roughly 5-14:1 "
+        "instead of 20 or more, and it costs a little transmit power at resonance.",
+        "<b>Sweep the whole HF range</b> - the Calculation-section tick box, on by default for this antenna; untick for the usual band-only sweep (faster). "
+        "The same box is available on dipoles, OCFD, G5RV, fan and trap dipoles, long wires, Zepp, loops, Lazy-H, the delta loop and the HF verticals."]))
+    s.append(shot("17_efhw_swr.png", "80 m EFHW: SWR from 3 to 30 MHz with the amateur bands shaded.", width=5.0 * inch))
+    s.append(shot("17b_efhw_bands.png", "The Multi-band tab for the same wire.", width=5.0 * inch))
+    s.append(P("Delta loop with selectable orientation (HF wire antennas)", style_h2))
+    s.append(P("A full-wave triangular loop. Choose the <b>orientation</b>: apex up (base at the bottom), apex down (base on top) or horizontal (flat). "
+               "<b>Feed point</b> (middle of the base, a corner, or the middle of a slanted side) sets the polarisation, <b>tilt</b> leans a vertical loop over, "
+               "and <b>direction</b> is the compass bearing of the broadside lobe. The height setting is the lowest point of the loop."))
+    s.append(table([
+        ["Choice", "Effect (20 m, 8 m high, average ground)"],
+        ["Apex up, feed in the base", "Horizontal polarisation, about 7 dBi at 28 degrees, feed about 120 ohm."],
+        ["Apex down, feed in the base", "About 1 dB more gain than apex up and a lower take-off angle (22 degrees)."],
+        ["Corner or side feed", "Mixed polarisation with a vertical component; 3-4 dB less peak (horizontal) gain."],
+        ["Horizontal", "High-angle (NVIS-type) radiation, about 40 degrees take-off."]],
+        [2.2 * inch, 5.0 * inch]))
+    s.append(shot("18_delta_patterns.png", "Apex-up delta loop on 20 m: two broadside lobes.", width=4.8 * inch))
+    s.append(shot("18b_delta_geo.png", "Geometry, apex up.", width=3.8 * inch))
+    s.append(shot("18c_delta_down_geo.png", "Geometry, apex down.", width=3.8 * inch))
     s.append(PageBreak())
 
     # ------------------------------------------------------------------ catalog

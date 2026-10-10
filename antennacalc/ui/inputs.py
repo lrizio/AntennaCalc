@@ -178,9 +178,12 @@ class InputPanel(QWidget):
         self.autotune = QCheckBox("Auto-tune to resonance")
         self.autotune.setChecked(True)
         self.optimize = QCheckBox("Optimise gain / front-to-back")
+        self.wide = QCheckBox("Sweep the whole HF range (1.8-30 MHz)")
+        self.wide.setToolTip("Plot SWR and impedance from 1.8 to 30 MHz with the amateur bands shaded - shows harmonic and multi-band behaviour. Slower.")
         lay.addWidget(self.quality)
         lay.addWidget(self.autotune)
         lay.addWidget(self.optimize)
+        lay.addWidget(self.wide)
         lay.addStretch(1)
 
         # ---- bottom bar (always visible)
@@ -271,6 +274,8 @@ class InputPanel(QWidget):
         self.optimize.setVisible(spec.optimizable)
         self.btn_opt.setVisible(spec.optimizable)
         self.optimize.setChecked(spec.optimize_default)
+        self.wide.setVisible(spec.wide_ok)
+        self.wide.setChecked(spec.wide_default)
         self.autotune.setVisible(not spec.analytic)
         self.quality.setVisible(not spec.analytic)
         self._build_params(spec)
@@ -352,7 +357,8 @@ class InputPanel(QWidget):
             height=self.height.value(), ground=Ground(g.kind, g.sigma, g.eps_r), power_w=self.power.value(),
             zref=self.zref.value(), ratio=self.ratio.currentData(), coax_key=self.coax.currentData(),
             coax_len=self.coax_len.value(), lmatch=self.lmatch.isChecked(), spw=self.quality.currentData(),
-            auto_tune=self.autotune.isChecked(), optimize=self.optimize.isChecked())
+            auto_tune=self.autotune.isChecked(), optimize=self.optimize.isChecked(),
+            wide_sweep=bool(spec.wide_ok and self.wide.isChecked()))
         basis = "free" if self.basis.currentIndex() == 0 else "ground"
         return spec, req, self.param_values(), basis
 
@@ -375,7 +381,8 @@ class InputPanel(QWidget):
              "ground": self.ground.currentText(), "power": self.power.value(), "ratio": self.ratio.currentIndex(),
              "coax": self.coax.currentIndex(), "coax_len": self.coax_len.value(), "zref": self.zref.value(),
              "lmatch": self.lmatch.isChecked(), "quality": self.quality.currentIndex(),
-             "autotune": self.autotune.isChecked(), "optimize": self.optimize.isChecked(), "params": {}}
+             "autotune": self.autotune.isChecked(), "optimize": self.optimize.isChecked(),
+             "wide": self.wide.isChecked(), "params": {}}
         for k, (p, w) in self.param_widgets.items():
             if isinstance(w, QComboBox):
                 s["params"][k] = w.currentText()
@@ -397,7 +404,8 @@ class InputPanel(QWidget):
             if k in s:
                 w.setValue(s[k])
         for w, k in ((self.gain_on, "gain_on"), (self.size_on, "size_on"), (self.hollow_on, "hollow_on"),
-                     (self.lmatch, "lmatch"), (self.autotune, "autotune"), (self.optimize, "optimize")):
+                     (self.lmatch, "lmatch"), (self.autotune, "autotune"), (self.optimize, "optimize"),
+                     (self.wide, "wide")):
             if k in s:
                 w.setChecked(bool(s[k]))
         for w, k in ((self.basis, "basis"), (self.ratio, "ratio"), (self.coax, "coax"), (self.quality, "quality")):
