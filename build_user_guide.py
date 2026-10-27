@@ -162,8 +162,8 @@ def build():
         ["Automatic L-match", "Adds an ideal L-network at the feedpoint, calculated at the design frequency, so the antenna is matched to your system impedance. The values appear on the Matching tab."],
         ["Antenna options", "Settings special to the chosen design (number of radials, element count, traps, termination resistor, windings sense, and so on)."],
         ["Calculation", "Fast / Normal / Fine controls the number of wire segments per wavelength. Auto-tune trims lengths to resonance; Optimise (beams) refines spacings and lengths. "
-         "<b>Sweep the whole HF range</b> (HF wire antennas and verticals) plots SWR and impedance from 1.8 to 30 MHz with the amateur bands shaded, "
-         "so harmonic and multi-band behaviour is visible; it is on by default for the EFHW and takes a few seconds longer."]],
+         "<b>Scan a frequency range</b> (HF wire antennas and verticals) plots SWR and impedance between a Start and Stop frequency you choose (default 1.8 to 55 MHz) with the amateur bands shaded, "
+         "so harmonic and multi-band behaviour is visible; it is on by default for the EFHW and takes a few seconds longer. On the SWR / Impedance tab, <b>click the graph</b> to read the SWR, impedance, gain and take-off angle at that frequency."]],
         [1.9 * inch, 5.3 * inch]))
     s.append(Spacer(1, 6))
     s.append(callout("<b>Tip:</b> change one thing at a time and press DESIGN again; most designs finish in a second or two. "
@@ -260,7 +260,7 @@ def build():
     s.append(shot("16b_w8jk_geo.png", "Geometry: two parallel dipoles, each with its own feed point (fed together, out of phase).", width=4.4 * inch))
     s.append(P("End-fed half-wave on several bands (HF wire antennas)", style_h2))
     s.append(P("An EFHW cut for 80 m also resonates near its harmonics, so one wire can serve 80, 40, 20, 15 and 10 m through a 49:1 transformer. "
-               "AntennaCalc sweeps the whole HF range (the amateur bands are shaded) so you can see the evenly spaced dips, and offers these options:"))
+               "AntennaCalc scans a wide frequency range (the amateur bands are shaded) so you can see the evenly spaced dips, and offers these options:"))
     s.append(bullets([
         "<b>Tune the length for</b> - <i>All harmonic bands</i> (the default) lengthens the wire slightly so the 40/20/15/10 m dips fall on the bands, "
         "at the cost of the 80 m dip sitting a little low; <i>Fundamental band only</i> centres the lowest band and leaves the harmonics a few percent high.",
@@ -268,7 +268,7 @@ def build():
         "in line with the radiator turns the antenna into an off-centre-fed dipole on the higher bands.",
         "<b>Transformer loss</b> - core loss of the 49:1 unun (default 0.5 dB when matched). It is what holds the SWR peaks between the dips to roughly 5-14:1 "
         "instead of 20 or more, and it costs a little transmit power at resonance.",
-        "<b>Sweep the whole HF range</b> - the Calculation-section tick box, on by default for this antenna; untick for the usual band-only sweep (faster). "
+        "<b>Scan a frequency range</b> - the Calculation-section tick box, on by default for this antenna; untick for the usual band-only sweep (faster). "
         "The same box is available on dipoles, OCFD, G5RV, fan and trap dipoles, long wires, Zepp, loops, Lazy-H, the delta loop and the HF verticals."]))
     s.append(shot("17_efhw_swr.png", "80 m EFHW: SWR from 3 to 30 MHz with the amateur bands shaded.", width=5.0 * inch))
     s.append(shot("17b_efhw_bands.png", "The Multi-band tab for the same wire.", width=5.0 * inch))
@@ -308,7 +308,7 @@ def build():
     s.append(P("Several entries have a selector rather than a separate catalog line: the <b>Delta loop</b> covers apex up, apex down and horizontal (flat) triangles with a choice of "
                "feed point (middle of the base, a corner, or a slanted side), a tilt for vertical loops and a broadside direction; the <b>Half-square / Bobtail curtain</b> covers the "
                "2-vertical and 3-vertical arrays; and the <b>EFHW</b> offers a counterpoise style, transformer loss and compromise tuning across the harmonic bands. "
-               "On the HF wire antennas and verticals the <i>Sweep the whole HF range</i> tick box (Calculation section) shows SWR from 1.8 to 30 MHz."))
+               "On the HF wire antennas and verticals the <i>Scan a frequency range</i> tick box (Calculation section) shows SWR from 1.8 to 55 MHz (or any Start/Stop you set)."))
     s.append(PageBreak())
 
     # ------------------------------------------------------------------ method

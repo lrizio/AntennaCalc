@@ -38,7 +38,9 @@ class Requirements:
     spw: int = 20                         # segments per wavelength
     auto_tune: bool = True
     optimize: bool = False
-    wide_sweep: bool = False              # sweep the whole HF range (1.8-30 MHz) instead of just the band
+    wide_lo: float = 1.8                  # scan start/stop (MHz) used when wide_sweep is on
+    wide_hi: float = 55.0
+    wide_sweep: bool = False              # sweep 1.8-55 MHz instead of just the band
 
     @property
     def lam(self) -> float:
@@ -272,17 +274,19 @@ class Spec:
     wide_default: bool = False
 
 
-HF_SWEEP = (1.8, 30.0)
+HF_SWEEP = (1.8, 55.0)
 HF_SWEEP_STEP = 0.1
 
 
 def apply_wide_sweep(design: "Design", req: "Requirements"):
-    """Whole-HF SWR sweep: 1.8-30 MHz every 0.1 MHz with the amateur bands shaded."""
+    """Whole-HF SWR sweep: 1.8-55 MHz every 0.1 MHz with the amateur bands shaded."""
     if not getattr(req, "wide_sweep", False) or design.analytic is not None or design.structure is None:
         return design
-    lo, hi = HF_SWEEP
+    lo, hi = req.wide_lo, req.wide_hi
+    if hi <= lo:
+        lo, hi = HF_SWEEP
     design.sweep_range = (lo, hi)
-    design.sweep_points = int(round((hi - lo) / HF_SWEEP_STEP)) + 1
+    design.sweep_points = max(int(round((hi - lo) / HF_SWEEP_STEP)) + 1, 51)
     design.shade_bands = [(BAND_BY_LABEL[b][1], BAND_BY_LABEL[b][2]) for b in HF_BAND_LABELS]
     return design
 

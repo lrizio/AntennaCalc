@@ -178,12 +178,21 @@ class InputPanel(QWidget):
         self.autotune = QCheckBox("Auto-tune to resonance")
         self.autotune.setChecked(True)
         self.optimize = QCheckBox("Optimise gain / front-to-back")
-        self.wide = QCheckBox("Sweep the whole HF range (1.8-30 MHz)")
-        self.wide.setToolTip("Plot SWR and impedance from 1.8 to 30 MHz with the amateur bands shaded - shows harmonic and multi-band behaviour. Slower.")
+        self.wide = QCheckBox("Scan a frequency range (SWR / impedance)")
+        self.wide.setToolTip("Plot SWR and impedance between the start and stop frequencies below (default 1.8-55 MHz) with the amateur bands shaded - shows harmonic and multi-band behaviour. Slower.")
         lay.addWidget(self.quality)
         lay.addWidget(self.autotune)
         lay.addWidget(self.optimize)
         lay.addWidget(self.wide)
+        self.wide_lo = QDoubleSpinBox(); self.wide_hi = QDoubleSpinBox()
+        for sb, v in ((self.wide_lo, 1.8), (self.wide_hi, 55.0)):
+            sb.setMinimumWidth(60); sb.setRange(0.1, 1000.0); sb.setDecimals(2); sb.setSingleStep(1.0); sb.setValue(v)
+        self.wide_lo.setToolTip("Scan start frequency"); self.wide_hi.setToolTip("Scan stop frequency")
+        wrow = QWidget(); wl = QHBoxLayout(wrow); wl.setContentsMargins(20, 0, 0, 0); wl.setSpacing(4)
+        wl.addWidget(QLabel("From")); wl.addWidget(self.wide_lo); wl.addWidget(QLabel("to")); wl.addWidget(self.wide_hi); wl.addWidget(QLabel("MHz"))
+        self.wide_row = wrow
+        lay.addWidget(wrow)
+        self.wide.toggled.connect(self._wide_toggled)
         lay.addStretch(1)
 
         # ---- bottom bar (always visible)
@@ -276,10 +285,18 @@ class InputPanel(QWidget):
         self.optimize.setChecked(spec.optimize_default)
         self.wide.setVisible(spec.wide_ok)
         self.wide.setChecked(spec.wide_default)
+        self.wide_row.setVisible(spec.wide_ok and spec.wide_default)
         self.autotune.setVisible(not spec.analytic)
         self.quality.setVisible(not spec.analytic)
         self._build_params(spec)
+        self._shrinkable_combos()
         self.spec_changed.emit(spec)
+
+    def _shrinkable_combos(self):
+        """Long item texts must not widen the panel past the scroll area (that clips every field under the scroll bar)."""
+        for cb in self.form_host.findChildren(QComboBox):
+            cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(12)
 
     def _build_params(self, spec: Spec):
         while self.opt_form.rowCount():
@@ -358,9 +375,13 @@ class InputPanel(QWidget):
             zref=self.zref.value(), ratio=self.ratio.currentData(), coax_key=self.coax.currentData(),
             coax_len=self.coax_len.value(), lmatch=self.lmatch.isChecked(), spw=self.quality.currentData(),
             auto_tune=self.autotune.isChecked(), optimize=self.optimize.isChecked(),
-            wide_sweep=bool(spec.wide_ok and self.wide.isChecked()))
+            wide_sweep=bool(spec.wide_ok and self.wide.isChecked()),
+            wide_lo=self.wide_lo.value(), wide_hi=self.wide_hi.value())
         basis = "free" if self.basis.currentIndex() == 0 else "ground"
         return spec, req, self.param_values(), basis
+
+    def _wide_toggled(self, on):
+        self.wide_row.setVisible(on)
 
     def set_busy(self, busy: bool):
         self.btn_design.setEnabled(not busy)
@@ -382,7 +403,7 @@ class InputPanel(QWidget):
              "coax": self.coax.currentIndex(), "coax_len": self.coax_len.value(), "zref": self.zref.value(),
              "lmatch": self.lmatch.isChecked(), "quality": self.quality.currentIndex(),
              "autotune": self.autotune.isChecked(), "optimize": self.optimize.isChecked(),
-             "wide": self.wide.isChecked(), "params": {}}
+             "wide": self.wide.isChecked(), "wide_lo": self.wide_lo.value(), "wide_hi": self.wide_hi.value(), "params": {}}
         for k, (p, w) in self.param_widgets.items():
             if isinstance(w, QComboBox):
                 s["params"][k] = w.currentText()
@@ -400,7 +421,8 @@ class InputPanel(QWidget):
         self.band.blockSignals(False)
         for w, k in ((self.f0, "f0"), (self.flo, "flo"), (self.fhi, "fhi"), (self.gain, "gain"), (self.size, "size"),
                      (self.diam_custom, "diam_custom"), (self.wall, "wall"), (self.height, "height"),
-                     (self.power, "power"), (self.coax_len, "coax_len"), (self.zref, "zref")):
+                     (self.power, "power"), (self.coax_len, "coax_len"), (self.zref, "zref"),
+                     (self.wide_lo, "wide_lo"), (self.wide_hi, "wide_hi")):
             if k in s:
                 w.setValue(s[k])
         for w, k in ((self.gain_on, "gain_on"), (self.size_on, "size_on"), (self.hollow_on, "hollow_on"),

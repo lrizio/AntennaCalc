@@ -226,6 +226,10 @@ class MainWindow(QMainWindow):
         sl.addLayout(row)
         self.swr_plot = LinePlot("SWR", "MHz", "SWR (x:1)")
         self.z_plot = LinePlot("Impedance at the feedpoint", "MHz", "ohm")
+        for pl in (self.swr_plot, self.z_plot):
+            pl.clickable = True
+            pl.setCursor(Qt.CrossCursor)
+            pl.clicked.connect(self._probe)
         sl.addWidget(self.swr_plot, 1)
         sl.addWidget(self.z_plot, 1)
         self._page(swr, "SWR / Impedance")
@@ -492,10 +496,27 @@ class MainWindow(QMainWindow):
         gnd = (d.structure is not None and d.structure.ground.kind != "free") or (d.analytic is not None and d.analytic.upper_only)
         self.surface.set_data(p.sphere, span=float(self.span.currentData()), ground=gnd, unit="dBic" if d.cp else "dBi")
 
+    def _probe(self, f):
+        res = self.result
+        if not res:
+            return
+        pt = engine.point_at(res, f)
+        mode = self.swr_at.currentData()
+        lines = [f"{pt['f']:.2f} MHz", f"SWR {pt['swr_' + mode]:.2f}:1" if pt['swr_' + mode] < 100 else "SWR >100:1"]
+        z = pt["z"]
+        lines.append(f"Z {z.real:.0f}{z.imag:+.0f}j ohm")
+        if pt["gain"] is not None:
+            lines.append(f"Gain {pt['gain']:.1f} {pt.get('unit', 'dBi')}")
+            lines.append(f"Take-off {pt['takeoff']:.0f} deg")
+        self.swr_plot.set_mark(pt["f"], lines)
+        self.z_plot.set_mark(pt["f"], lines)
+
     def _update_swr(self, *_):
         res = self.result
         if not res:
             return
+        self.swr_plot.set_mark(None, [])
+        self.z_plot.set_mark(None, [])
         mode = self.swr_at.currentData()
         sw = {"rig": res.swr_rig, "feed": res.swr_feed, "line": res.swr_line}[mode]
         req = res.req

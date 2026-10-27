@@ -185,6 +185,8 @@ class PolarPlot(QWidget):
 
 
 class LinePlot(QWidget):
+    clicked = Signal(float)
+
     def __init__(self, title: str = "", xlabel: str = "MHz", ylabel: str = "", parent=None):
         super().__init__(parent)
         self.title = title
@@ -199,6 +201,12 @@ class LinePlot(QWidget):
         self.setMinimumSize(300, 200)
         self.setMouseTracking(True)
         self._hover = None
+        self._mark = None       # (x, [text lines]) set by clicking
+        self.clickable = False
+
+    def set_mark(self, x, lines):
+        self._mark = (x, list(lines)) if x is not None else None
+        self.update()
 
     def set_series(self, series, vlines=(), hlines=(), band=None, ylim=None, logy=False):
         self.series = list(series)
@@ -310,6 +318,21 @@ class LinePlot(QWidget):
             hx, hv = self._hover
             p.setPen(QColor(t.warn))
             p.drawText(QPointF(r.right() - 150, r.top() + 28), f"{hx:.4f}  ->  {hv:.3g}")
+        if self._mark is not None and x0 <= self._mark[0] <= x1:
+            mx, lines = self._mark
+            pen = QPen(QColor(t.warn)); pen.setWidthF(1.5); p.setPen(pen)
+            p.drawLine(QPointF(X(mx), r.top()), QPointF(X(mx), r.bottom()))
+            fm = p.fontMetrics()
+            w = max(fm.horizontalAdvance(s) for s in lines) + 16
+            h = fm.height() * len(lines) + 10
+            bx = X(mx) + 10
+            if bx + w > r.right():
+                bx = X(mx) - 10 - w
+            box = QRectF(bx, r.top() + 36, w, h)
+            p.fillRect(box, QColor(t.screen))
+            p.setPen(QPen(QColor(t.warn), 1)); p.drawRect(box)
+            for k, s in enumerate(lines):
+                p.drawText(QPointF(box.left() + 8, box.top() + 5 + fm.ascent() + k * fm.height()), s)
 
     def mouseMoveEvent(self, ev):
         if not self.series:
@@ -322,6 +345,17 @@ class LinePlot(QWidget):
         i = int(np.argmin(np.abs(xs - xv)))
         self._hover = (float(xs[i]), float(ys[i]))
         self.update()
+
+    def mousePressEvent(self, ev):
+        if not (self.clickable and self.series and ev.button() == Qt.LeftButton):
+            return
+        r = self._rect()
+        if not r.contains(ev.position()):
+            return
+        x0, x1, _, _ = self._ranges()
+        xv = x0 + (ev.position().x() - r.left()) / max(r.width(), 1) * (x1 - x0)
+        xs = np.asarray(self.series[0][1], float)
+        self.clicked.emit(float(xs[int(np.argmin(np.abs(xs - xv)))]))
 
     def leaveEvent(self, ev):
         self._hover = None

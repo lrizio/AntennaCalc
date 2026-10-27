@@ -35,13 +35,38 @@ def main():
         out = sys.argv[sys.argv.index("--selftest") + 1] if len(sys.argv) > sys.argv.index("--selftest") + 1 else "selftest.txt"
         selftest(out)
         return
-    from PySide6.QtWidgets import QApplication
-    from antennacalc.ui.main_window import MainWindow
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+    from PySide6.QtWidgets import QApplication, QSplashScreen
     app = QApplication(sys.argv)
     app.setApplicationName("AntennaCalc")
     app.setOrganizationName("HamProjects")
+
+    pm = QPixmap(460, 200)
+    pm.fill(QColor("#15202b"))
+    p = QPainter(pm)
+    p.setPen(QColor("#e6edf3"))
+    f = QFont("Segoe UI", 24, QFont.Bold)
+    p.setFont(f)
+    p.drawText(pm.rect().adjusted(0, 30, 0, 0), Qt.AlignHCenter | Qt.AlignTop, "AntennaCalc")
+    p.setPen(QColor("#8fb8de"))
+    p.setFont(QFont("Segoe UI", 12))
+    p.drawText(pm.rect().adjusted(0, 90, 0, 0), Qt.AlignHCenter | Qt.AlignTop, "Loading, please wait...")
+    p.end()
+    splash = QSplashScreen(pm, Qt.WindowStaysOnTopHint)
+    splash.show()
+    app.processEvents()
+
+    def note(msg):
+        splash.showMessage(msg, Qt.AlignHCenter | Qt.AlignBottom, QColor("#8fb8de"))
+        app.processEvents()
+
+    note("Loading simulation engine...")
+    from antennacalc.ui.main_window import MainWindow
+    note("Building the user interface...")
     w = MainWindow()
     w.show()
+    splash.finish(w)
     sys.exit(app.exec())
 
 

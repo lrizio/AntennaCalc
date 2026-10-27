@@ -553,6 +553,27 @@ def evaluate(spec: Spec, req: Requirements, ex: dict, scales: dict, progress=Non
     return res
 
 
+def point_at(res: Result, f_mhz: float) -> dict:
+    """SWR / peak gain / take-off angle at one frequency of a finished sweep (re-solves just that point)."""
+    i = int(np.argmin(np.abs(res.f - f_mhz)))
+    out = {"f": float(res.f[i]), "swr_rig": float(res.swr_rig[i]), "swr_feed": float(res.swr_feed[i]),
+           "swr_line": float(res.swr_line[i]), "z": complex(res.zfeed[i]), "gain": None, "takeoff": None}
+    design = res.design
+    try:
+        if design.analytic is not None:
+            pat = compute_pattern(design, None, res.req, fine=True)
+        elif res.model is not None:
+            _, sol = terminal_z(design, res.model, out["f"])
+            pat = compute_pattern(design, sol, res.req, fine=True)
+        else:
+            return out
+        out["gain"], out["takeoff"] = float(pat.peak_db), float(pat.takeoff)
+        out["unit"] = "dBic" if design.cp else "dBi"
+    except Exception:
+        pass
+    return out
+
+
 def cmath_phase(z):
     return math.atan2(z.imag, z.real)
 

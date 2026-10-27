@@ -241,13 +241,17 @@ def test_wide_sweep_option_covers_hf_and_leaves_the_design_unchanged():
     narrow = engine.evaluate(spec, req, ex, sc, do_bands=False)
     req2 = _req(spec, band, wide_sweep=True)
     wide = engine.evaluate(spec, req2, ex, sc, do_bands=False)
-    assert abs(wide.f[0] - 1.8) < 1e-6 and abs(wide.f[-1] - 30.0) < 1e-6 and len(wide.f) > 250
+    assert abs(wide.f[0] - 1.8) < 1e-6 and abs(wide.f[-1] - 55.0) < 1e-6 and len(wide.f) > 250
     assert wide.design.shade_bands and len(wide.design.shade_bands) == 10
     assert abs(wide.metrics["swr_f0"] - narrow.metrics["swr_f0"]) < 0.3
     # a 40 m dipole is also resonant on its odd harmonics: a low SWR dip near 21 MHz
     third = wide.swr_rig[(wide.f > 20.5) & (wide.f < 22.5)]
     assert third.min() < 3.0 * 2
     assert not REGISTRY["yagi"].wide_ok
+    # the scan range is user-selectable
+    req3 = _req(spec, band, wide_sweep=True, wide_lo=13.0, wide_hi=15.0)
+    part = engine.evaluate(spec, req3, ex, sc, do_bands=False)
+    assert abs(part.f[0] - 13.0) < 1e-6 and abs(part.f[-1] - 15.0) < 1e-6
 
 
 # --------------------------------------------------------------------------- NEC-2 deck export
