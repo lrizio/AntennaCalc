@@ -1121,6 +1121,17 @@ class WireEditor(QWidget):
         if fit:
             self.canvas.fit()
 
+    def replace_drawing(self, dr: Drawing):
+        """Load a new drawing as an undoable edit (used when copying a built-in design in)."""
+        self.push_undo()
+        self.drawing = dr
+        self.selected = None
+        self.tuned_scale = None
+        self.b_scale.hide()
+        self.name.setText(dr.name)
+        self.refresh()
+        self.canvas.fit()
+
     def set_tool(self, tool):
         self.canvas.tool = tool
         self.canvas.wire_start = None

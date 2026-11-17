@@ -27,6 +27,7 @@ class CWire:
     p1: list
     label: str = ""
     diam_mm: float = 0.0          # 0 = use the conductor diameter chosen on the input panel
+    min_seg: int = 1              # fewest MoM segments (kept from a copied built-in design; not shown in the editor)
 
     def length(self) -> float:
         return float(np.linalg.norm(np.subtract(self.p1, self.p0)))
@@ -180,8 +181,9 @@ class Drawing:
         return f"{prefix}{n}"
 
     # ---------------------------------------------------------------- editing
-    def add_wire(self, p0, p1, label="", diam_mm=0.0) -> CWire:
-        w = CWire(self.new_id(), [float(v) for v in p0], [float(v) for v in p1], label or self.default_label("W"), diam_mm)
+    def add_wire(self, p0, p1, label="", diam_mm=0.0, min_seg=1) -> CWire:
+        w = CWire(self.new_id(), [float(v) for v in p0], [float(v) for v in p1], label or self.default_label("W"), diam_mm,
+                  int(min_seg))
         self.wires.append(w)
         return w
 
@@ -223,7 +225,9 @@ class Drawing:
         Returns (first wire, second wire)."""
         w = self.wire(wid)
         p = list(map(float, w.point(at)))
-        w2 = CWire(self.new_id(), p, list(w.p1), self.default_label("W"), w.diam_mm)
+        w2 = CWire(self.new_id(), p, list(w.p1), self.default_label("W"), w.diam_mm,
+                   max(1, math.ceil(w.min_seg * (1 - at))))
+        w.min_seg = max(1, math.ceil(w.min_seg * at))
         w.p1 = list(p)
         self.wires.insert(self.wires.index(w) + 1, w2)
         for o in self.sources + self.loads:
@@ -331,6 +335,142 @@ TEMPLATES = [("Empty", "empty"), ("Half-wave dipole", "dipole"), ("Inverted-V", 
              ("Ground-mounted vertical", "vertical"), ("Ground plane (elevated)", "gp"), ("Full-wave quad loop", "loop")]
 
 
+# --------------------------------------------------------------------------- built-in design -> drawing
+def _fit_load(fn, f0_hz: float, label: str):
+    """Express a load's impedance function as one of the editor's load kinds.
+    Returns (kind, r, x, l_uh, c_pf, max relative error over 0.5..2 x f0)."""
+    test = [f0_hz * k for k in (0.5, 0.7, 0.85, 1.0, 1.2, 1.4, 2.0)]
+    zt = [complex(fn(f)) for f in test]
+    z0 = complex(fn(f0_hz))
+    w0 = 2 * math.pi * f0_hz
+
+    def err(cand: CLoad):
+        return max(abs(cand.z(f) - z) / max(abs(z), 1.0) for f, z in zip(test, zt))
+
+    def lc_fit(vals):
+        """vals = X (series) or B (parallel) at the test frequencies.  With x = w / w0:
+        v * x = a x^2 - b, where (series) a = L w0, b = 1 / (C w0); (parallel) a = C w0, b = 1 / (L w0).
+        Returns (a, b), both >= 0 (0 = that element is absent)."""
+        x = np.array([2 * math.pi * f / w0 for f in test])
+        y = np.array(vals) * x
+        A = np.column_stack([x * x, -np.ones_like(x)])
+        a, b = np.linalg.lstsq(A, y, rcond=None)[0]
+        if a < 0:
+            a, b = 0.0, max(-float(np.mean(y)), 0.0)
+        if b < 0:
+            a, b = max(float(np.sum(y * x * x) / np.sum(x ** 4)), 0.0), 0.0
+        return float(a), float(b)
+    cands = [CLoad(0, 0, 0, "fixed", r=z0.real, x=z0.imag, label=label)]
+    def at_resonance(a, b):
+        """The load's impedance at the L-C resonance (where R matters most), or at f0 without one."""
+        if a > 0 and b > 0 and 0.05 < math.sqrt(b / a) < 20:
+            return complex(fn(f0_hz * math.sqrt(b / a)))
+        return z0
+    a, b = lc_fit([z.imag for z in zt])                           # series: X = wL - 1/(wC)
+    cands.append(CLoad(0, 0, 0, "series", r=max(at_resonance(a, b).real, 0.0), l_uh=a / w0 * 1e6,
+                       c_pf=(1e12 / (b * w0) if b > 0 else 0.0), label=label))
+    yt = [1 / z if abs(z) > 0 else 0j for z in zt]
+    a, b = lc_fit([y.imag for y in yt])                           # parallel: B = wC - 1/(wL)
+    zr = at_resonance(a, b)
+    g = (1 / zr).real if abs(zr) > 0 else 0.0
+    cands.append(CLoad(0, 0, 0, "parallel", r=(1 / g if g > 1e-12 else 0.0), c_pf=a / w0 * 1e12,
+                       l_uh=(1e6 / (b * w0) if b > 0 else 0.0), label=label))
+    errs = [err(c) for c in cands]
+    if errs[0] < 0.01:                 # a constant impedance: keep it simple
+        i = 0
+    else:
+        i = int(np.argmin(errs))
+    c = cands[i]
+    return c.kind, c.r, c.x, c.l_uh, c.c_pf, errs[i]
+
+
+def drawing_from_design(design, req, sol_volts=None, name: str | None = None, seg_counts=None):
+    """Convert a built-in MoM design (its mom.Structure) into an editable Drawing.
+    sol_volts: the port voltages that reproduce the design's excitation at the design frequency (needed for
+    current-driven and harness-fed arrays).  seg_counts: segments per wire in the original model, kept as each
+    wire's minimum so the copy is segmented the same way.  Returns (Drawing, list of notes on what could not be carried over)."""
+    st = design.structure
+    if st is None or not st.wires:
+        raise ValueError("This antenna uses a closed-form model - it has no wire geometry to copy into the Wire Editor.")
+    notes = []
+    dr = Drawing(name=name or f"{design.title} (copy)")
+    ids = []
+    used = set()
+    for i, w in enumerate(st.wires):
+        lab = (w.name or "").strip() or f"W{i + 1}"
+        if lab in used:
+            n = 2
+            while f"{lab} {n}" in used:
+                n += 1
+            lab = f"{lab} {n}"
+        used.add(lab)
+        diam = 0.0 if abs(w.radius - req.radius) < 1e-9 else round(w.radius * 2000.0, 4)
+        ids.append(dr.add_wire(w.p0, w.p1, lab, diam, max(w.min_seg, w.nseg or 1, seg_counts[i] if seg_counts else 1)).id)
+    volts = list(sol_volts) if sol_volts is not None else [s.volts for s in st.sources]
+    if volts:
+        vmax = max(abs(v) for v in volts) or 1.0
+        ph0 = cmath.phase(volts[0]) if abs(volts[0]) > 0 else 0.0
+    for k, s in enumerate(st.sources):
+        v = complex(volts[k]) if k < len(volts) else complex(s.volts)
+        mag = abs(v) / vmax if volts else 1.0
+        ph = math.degrees(cmath.phase(v) - ph0) if abs(v) > 0 else 0.0
+        ph = (ph + 180.0) % 360.0 - 180.0
+        dr.sources.append(CSource(dr.new_id(), ids[s.wire], float(s.at), round(mag, 6), round(ph, 3),
+                                  s.label or f"S{k + 1}"))
+    f0 = req.f_mhz * 1e6
+    worst = []
+    for k, ld in enumerate(st.loads):
+        lab = (ld.label or "").strip() or f"L{k + 1}"
+        kind, r, x, l_uh, c_pf, e = _fit_load(ld.fn, f0, lab)
+        dr.loads.append(CLoad(dr.new_id(), ids[ld.wire], float(ld.at), kind, round(r, 6), round(x, 6),
+                              round(l_uh, 6), round(c_pf, 4), lab))
+        if e > 0.05:
+            worst.append(f"{lab} (up to {e * 100:.0f}% off between half and twice the design frequency)")
+    if worst:
+        notes.append("Some loads only approximately match the original away from the design frequency: "
+                     + ", ".join(worst) + ".")
+    if design.mode == "network" or st.lines or st.stub:
+        notes.append("The transmission-line feed harness between the elements cannot be drawn; the sources are set to "
+                     f"the voltages it delivers at {req.f_mhz:.3f} MHz, so the copy is only exact at that frequency.")
+    elif design.mode == "currents":
+        notes.append("The element currents were set by an ideal feed network; the sources are set to the voltages "
+                     f"that give those currents at {req.f_mhz:.3f} MHz.")
+    elif design.mode == "equal" and len(st.sources) > 1:
+        notes.append("The original joins all its feed points into one feed; in the Wire Editor each source is separate "
+                     "and the SWR shown is for the first one.")
+    if design.line is not None:
+        notes.append("The antenna's own feed-line section (e.g. ladder line or matching section) is not part of the "
+                     "drawing; choose a feeder on the input panel if you need it.")
+    if design.imp_override is not None:
+        notes.append("The original uses a special feed model (e.g. a coupling loop or matching network) for its "
+                     "impedance; the copy shows the impedance at the drawn source instead.")
+    if design.multiband:
+        notes.append("The Wire Editor copy is analysed on the band selected on the input panel only; change the band "
+                     "there to check it on the other bands it was designed for ("
+                     + ", ".join(lab for lab, _ in design.multiband) + ").")
+    if any(abs(w.sigma - req.sigma) > 1 and w.sigma > 0 for w in st.wires):
+        notes.append("Some wires used a different conductor material; the copy uses the material on the input panel.")
+    return dr, notes
+
+
+def drawing_from_spec(spec, req, ex: dict, scales: dict):
+    """Rebuild a built-in design (with its tuned scales, without the common-mode coax model) and convert it.
+    Returns (Drawing, notes, ground): some designs fix their own ground (e.g. free space for VHF beams), and the
+    copy must be analysed over that same ground."""
+    from . import engine, mom
+    design = spec.builder(req, dict(ex or {}), dict(scales or {}))
+    st = design.structure
+    if design.analytic is not None or st is None or not st.wires:
+        raise ValueError("This antenna uses a closed-form model - it has no wire geometry to copy into the Wire Editor.")
+    volts = None
+    model = engine.build_model(design, req)
+    if design.mode in ("currents", "network") or st.lines or st.stub:
+        _, sol = engine.terminal_z(design, model, req.f_mhz)
+        volts = [sol.V[b] for b in sol.port_basis]
+    dr, notes = drawing_from_design(design, req, volts, seg_counts=list(model.wire_n))
+    return dr, notes, st.ground
+
+
 # --------------------------------------------------------------------------- builder
 def build_structure(dr: Drawing, st, req, scale: float = 1.0):
     """Fill a mom.Structure from the drawing.  Wires are split at every source and load so each one sits
@@ -370,7 +510,8 @@ def build_structure(dr: Drawing, st, req, scale: float = 1.0):
         radius = (w.diam_mm / 2000.0) if w.diam_mm > 0 else req.radius
         idx = []
         for a, b in zip(fr[:-1], fr[1:]):
-            idx.append(st.add(tf(w.point(a)), tf(w.point(b)), radius, sigma=req.sigma, name=w.label, min_seg=1))
+            ms = max(1, math.ceil(w.min_seg * (b - a) - 1e-9))
+            idx.append(st.add(tf(w.point(a)), tf(w.point(b)), radius, sigma=req.sigma, name=w.label, min_seg=ms))
         for o in dr.sources + dr.loads:
             if o.wire != w.id:
                 continue

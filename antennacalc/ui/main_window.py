@@ -14,9 +14,9 @@ from PySide6.QtWidgets import (QSizePolicy, QScrollArea, QGraphicsDropShadowEffe
                                QMainWindow, QMessageBox, QPushButton, QSplitter, QStatusBar, QTableWidget,
                                QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
 
-from .. import VERSION, engine, export, report
+from .. import VERSION, custom, engine, export, report
 from ..updatecheck import PAGE_URL, UpdateChecker
-from ..common import fmt_len
+from ..common import GROUNDS, fmt_len
 from . import theme
 from .inputs import InputPanel
 from .plots import LinePlot, PolarPlot
@@ -147,7 +147,9 @@ class MainWindow(QMainWindow):
         self.inputs.spec_changed.connect(self._spec_changed)
         self.inputs.select("dipole")
         self._spec_changed(self.inputs.spec)
-        self._apply_theme(self.settings.value("theme", "SHACK"))
+        # DAYLIGHT is the default.  The setting moved from "theme" to "ui_theme" so that installs which saved
+        # SHACK back when it was the only default start light once; a theme picked from the View menu then sticks.
+        self._apply_theme(self.settings.value("ui_theme", "DAYLIGHT"))
         self.show_welcome()
         st = self.settings.value("split")
         if st is not None:
@@ -313,6 +315,9 @@ class MainWindow(QMainWindow):
         a = QAction("Optimise (beams)", self); a.setShortcut("F6"); a.triggered.connect(self.start_optimise); d.addAction(a)
         d.addSeparator()
         a = QAction("Wire Editor (draw a custom antenna)", self); a.setShortcut("Ctrl+E"); a.triggered.connect(self.open_editor); d.addAction(a)
+        a = QAction("Copy this design into the Wire Editor", self); a.setShortcut("Ctrl+Shift+E")
+        a.setToolTip("Turn the built-in design you last ran into an editable drawing (wires, sources and loads)")
+        a.triggered.connect(self.copy_to_editor); d.addAction(a)
         v = mb.addMenu("&View")
         for name in theme.THEMES:
             a = QAction(f"{name.title()} theme", self)
@@ -332,7 +337,7 @@ class MainWindow(QMainWindow):
         t = theme.set_current(name)
         QApplication.instance().setStyleSheet(theme.stylesheet(t))
         self.inputs._fit_width()          # the style changes widget sizes
-        self.settings.setValue("theme", name)
+        self.settings.setValue("ui_theme", name)
         if self.result is not None:
             self.show_result(self.result)
         else:
@@ -372,6 +377,41 @@ class MainWindow(QMainWindow):
         if self.inputs.spec.key != "custom":
             self.inputs.select("custom")
         self.tabs.setCurrentWidget(self.editor_page)
+
+    def copy_to_editor(self):
+        """Copy the last built-in result into the Wire Editor so it can be modified and saved as a custom design."""
+        res = self.result
+        if res is None:
+            QMessageBox.information(self, "AntennaCalc", "Run a built-in design first (DESIGN / F5), then copy it into the Wire Editor.")
+            return
+        if res.design.key == "custom":
+            self.open_editor()
+            return
+        try:
+            dr, notes, gnd = custom.drawing_from_spec(res.spec or self.inputs.spec, res.req, res.ex, res.scales)
+        except Exception as e:
+            QMessageBox.information(self, "AntennaCalc", f"This design cannot be copied into the Wire Editor:{chr(10) * 2}{e}")
+            return
+        keep = self.inputs.state()                 # switching type resets band, ground and feed: put them back
+        keep["type"] = "custom"
+        keep.pop("params", None)
+        lab = next((l for l, g in GROUNDS if g.kind == gnd.kind and (g.kind != "real" or
+                    (abs(g.sigma - gnd.sigma) < 1e-9 and abs(g.eps_r - gnd.eps_r) < 1e-9))), None)
+        if lab:
+            if lab != keep.get("ground"):
+                notes.append(f"The ground is set to '{lab}', the ground this design is modelled over.")
+            keep["ground"] = lab
+        else:
+            notes.append("This design uses its own ground model; check the ground on the input panel.")
+        self.inputs.set_state(keep)
+        self.editor.replace_drawing(dr)
+        self.tabs.setCurrentWidget(self.editor_page)
+        msg = (f"Copied '{res.design.title}' into the Wire Editor: {len(dr.wires)} wire(s), {len(dr.sources)} source(s), "
+               f"{len(dr.loads)} load(s). Edit it, press Analyse, and use File > Save design to keep it.")
+        if notes:
+            msg += chr(10) * 2 + "Please note:" + chr(10) + chr(10).join(" - " + n for n in notes)
+        msg += chr(10) * 2 + "Undo (Ctrl+Z) on the Wire Editor page brings back the previous drawing."
+        QMessageBox.information(self, "AntennaCalc", msg)
 
     def analyse_drawing(self):
         if self.inputs.spec.key != "custom":

@@ -1,4 +1,4 @@
-"""HamProjects family 'SHACK' palette with a light alternative."""
+"""HamProjects family palettes: light DAYLIGHT (the default) and dark 'SHACK'."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,7 +37,7 @@ DAYLIGHT = Theme("DAYLIGHT", bg="#dfe5ea", panel="#f4f7f9", edge="#aab8c3", btn=
                  c1="#0b7fa6", c2="#c46a00", c3="#0f8a3a")
 THEMES = {"SHACK": SHACK, "DAYLIGHT": DAYLIGHT}
 
-_current = SHACK
+_current = DAYLIGHT
 
 
 def current() -> Theme:
@@ -46,7 +46,7 @@ def current() -> Theme:
 
 def set_current(name: str) -> Theme:
     global _current
-    _current = THEMES.get(name, SHACK)
+    _current = THEMES.get(name, DAYLIGHT)
     return _current
 
 

@@ -539,7 +539,8 @@ def sweep_freqs(design: Design, req: Requirements, n: int = 25) -> np.ndarray:
     width = req.f_hi - req.f_lo
     span = max(width * 2.0, 0.06 * req.f_mhz)
     c = 0.5 * (req.f_lo + req.f_hi) if width > 0 else req.f_mhz
-    return np.linspace(c - span / 2, c + span / 2, n)
+    lo = max(c - span / 2, 0.5 * min(req.f_lo, req.f_mhz) if req.f_lo > 0 else 0.5 * req.f_mhz)   # very wide bands: stay above 0 Hz
+    return np.linspace(lo, c + span / 2, n)
 
 
 def evaluate(spec: Spec, req: Requirements, ex: dict, scales: dict, progress=None, cancel=None,

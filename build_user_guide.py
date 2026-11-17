@@ -88,7 +88,12 @@ def table(rows, widths, header=True):
 
 
 def block(*flow):
-    return KeepTogether(list(flow))
+    # flatten nested KeepTogethers (e.g. a shot()): reportlab mis-measures them and pushes the whole block to the
+    # next page, which left a heading alone on an otherwise blank page
+    out = []
+    for f in flow:
+        out += f._content if isinstance(f, KeepTogether) else [f]
+    return KeepTogether(out)
 
 
 def shot(name, caption, width=CONTENT_W):
@@ -395,9 +400,15 @@ def build():
     s.append(numbered([
         "Choose <b>Category: Custom</b> and <b>Antenna type: Custom wire antenna (Wire Editor)</b>, or use <b>Design &gt; Wire Editor</b> (Ctrl+E). "
         "The <b>Wire Editor</b> tab opens.",
-        "Draw the antenna, or start from a template (<b>New from template</b>).",
+        "Draw the antenna, start from a template (<b>New from template</b>), or start from a built-in design: run it, then use "
+        "<b>Design &gt; Copy this design into the Wire Editor</b> (Ctrl+Shift+E). Its wires, feed points and loads (coils, traps, "
+        "capacitors, loss resistors) become an editable drawing, with the tuned dimensions. Feed harnesses between elements (log-periodics, "
+        "phased arrays) cannot be drawn, so their sources are set to the voltages the harness gives at the design frequency.",
         "Set the band, ground, conductor and feed system on the left panel as usual. The <b>height comes from the drawing</b>, so the height box is disabled.",
         "Press <b>ANALYSE</b> on the editor page (or DESIGN / F5). The Summary tab shows the result."]))
+    s.append(shot("19g_copy_menu.png", "Starting from a built-in design: after running the loaded dipole, <b>Design &gt; Copy this design "
+                  "into the Wire Editor</b> turns it into a drawing, coils included, that you can change and save as your own design.",
+                  width=5.0 * inch))
     s.append(shot("19_editor.png", "The Wire Editor with a 40 m shortened dipole: two 6 m legs, a loading coil in each leg, the feed point "
                   "at the centre and a 'Span' dimension. Wire lengths are shown above each wire; the tables on the right hold the same data as numbers.",
                   width=6.6 * inch))
@@ -556,7 +567,7 @@ def build():
         ["Export report (PDF)", "File menu (Ctrl+P)", "Summary, requirement checks, cut list, patterns, SWR, geometry, matching and notes in one PDF."],
         ["Export NEC-2 deck", "File menu", "A .nec file with the wires, ground, loads, sources and transmission lines for 4nec2, EZNEC or xnec2c to cross-check the result."],
         ["Export cut list / sweep (CSV)", "File menu or the tab buttons", "Spreadsheet-ready tables."],
-        ["Theme", "View menu", "SHACK (dark) or DAYLIGHT (light)."],
+        ["Theme", "View menu", "DAYLIGHT (light, the default) or SHACK (dark)."],
         ["Check for updates", "Help menu (tick)", "A few seconds after start the program asks GitHub whether a newer release exists. If so, an amber UPDATE vX.Y AVAILABLE button appears at the right of the status bar; click it to open the download page. Nothing is downloaded or installed for you and nothing is sent except the request itself. Untick to turn it off (for example when offline)."]],
         [1.8 * inch, 2.0 * inch, 3.4 * inch]))
     s.append(P("Keyboard shortcuts", style_h2))

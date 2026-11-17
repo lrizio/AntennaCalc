@@ -473,3 +473,38 @@ def test_coax_route_follows_user_direction_heights_and_lengths():
     auto = cm.plan(st, np.array([0, 0, 10.0]), Requirements(f_mhz=7.1, coax_len=12), None)
     d = auto["coax"][2] - auto["coax"][1]
     assert abs(d[0]) < 1e-9                                            # auto: at right angles to an X-directed antenna
+
+
+# --------------------------------------------------------------------------- built-in design -> Wire Editor copy
+def test_load_fit_kinds():
+    from antennacalc.custom import _fit_load
+    from antennacalc.mhelp import coil_fn, trap_fn
+    f0 = 7.1e6
+    assert _fit_load(lambda f: 12 + 0j, f0, "R")[0] == "fixed"
+    kind, r, x, l_uh, c_pf, e = _fit_load(coil_fn(20e-6, 200, 7.1), f0, "coil")
+    assert kind == "series" and abs(l_uh - 20) < 0.01 and e < 0.01
+    fn, lh = trap_fn(7.1, 100.0, 150)
+    kind, r, x, l_uh, c_pf, e = _fit_load(fn, 14.2e6, "trap")
+    assert kind == "parallel" and abs(c_pf - 100) < 1 and abs(l_uh - lh * 1e6) / (lh * 1e6) < 0.01 and e < 0.05
+
+
+@pytest.mark.parametrize("key", ["dipole", "loaded_dipole", "yagi", "gp", "turnstile"])
+def test_copy_to_wire_editor_matches(key):
+    from antennacalc import custom
+    spec = REGISTRY[key]
+    req = _req(spec, spec.band_default or "20 m (14.0-14.35 MHz)")
+    ex = {p.key: p.default for p in spec.params}
+    res = engine.evaluate(spec, req, ex, {}, do_bands=False)
+    dr, _, req.ground = custom.drawing_from_spec(spec, req, ex, {})
+    dr = custom.Drawing.from_dict(dr.to_dict())
+    cres = engine.evaluate(REGISTRY["custom"], req, {"drawing": dr.to_dict(), "tune": "none"}, {}, do_bands=False)
+    za, zc = res.metrics["z_ant"], cres.metrics["z_ant"]
+    assert abs(zc - za) / abs(za) < 0.02
+    assert abs(cres.metrics["gain_dbi"] - res.metrics["gain_dbi"]) < 0.1
+
+
+def test_copy_rejects_closed_form():
+    from antennacalc import custom
+    spec = REGISTRY["dish"]
+    with pytest.raises(ValueError):
+        custom.drawing_from_spec(spec, _req(spec, spec.band_default or "20 m (14.0-14.35 MHz)"), {}, {})

@@ -16,6 +16,11 @@ from antennacalc.ui.worker import DesignWorker
 
 app = QApplication(sys.argv)
 w = MainWindow()
+# Guide screenshots use the light DAYLIGHT theme: the dark SHACK theme is hard to read in the PDF.
+# Set it directly rather than with w._apply_theme(), which would also save it as the user's own theme setting.
+from antennacalc.ui import theme
+app.setStyleSheet(theme.stylesheet(theme.set_current("DAYLIGHT")))
+w.inputs._fit_width()
 w.resize(1500, 900)
 w.show()
 app.processEvents()
@@ -162,6 +167,40 @@ def feed_shots():
     ip.feeder.setCurrentIndex(0); ip.balun_loss.setValue(0.0); ip.tuner.setCurrentIndex(0)
 
 
+def copy_menu_shot():
+    """Design menu open on 'Copy this design into the Wire Editor', drawn under the window's menu bar."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QPainter, QPixmap
+    design("loaded_dipole", lambda i: i.band.setCurrentText("40 m (7.0-7.3 MHz)"))
+    w.tabs.setCurrentIndex(T["summary"])
+    app.processEvents()
+    from PySide6.QtWidgets import QMenuBar
+    mb = w.menuWidget().findChild(QMenuBar)            # the menu bar sits under the custom title bar
+    dm = next(a for a in mb.actions() if a.text().replace("&", "") == "Design")
+    menu = dm.menu()
+    item = next(a for a in menu.actions() if a.text().startswith("Copy this design"))
+    mb.setActiveAction(dm)                              # Design title shown pressed
+    r = mb.actionGeometry(dm)
+    menu.popup(mb.mapToGlobal(r.bottomLeft()))
+    menu.setActiveAction(item)                          # the new item highlighted
+    app.processEvents()
+    win, mp = w.grab(), menu.grab()
+    o = mb.mapTo(w, QPoint(r.left(), r.bottom() + 1))
+    width = min(win.width(), max(o.x() + mp.width() + 260, 720))
+    height = o.y() + mp.height() + 30
+    pm = QPixmap(width, height)
+    p = QPainter(pm)
+    p.drawPixmap(0, 0, win, 0, 0, width, height)
+    p.drawPixmap(o.x(), o.y(), mp)
+    p.end()
+    menu.hide(); mb.setActiveAction(None)
+    pm.save(os.path.join(OUT, "19g_copy_menu.png"))
+    print("wrote 19g_copy_menu.png")
+
+
+if "--copy-menu-only" in sys.argv:
+    copy_menu_shot()
+    sys.exit(0)
 if "--editor-only" in sys.argv:
     editor_shots()
     sys.exit(0)
@@ -287,5 +326,6 @@ design("delta", delta_down)
 w.geo.set_view(35, 25)
 shot("18c_delta_down_geo.png", T["geo"])
 editor_shots()
+copy_menu_shot()
 feed_shots()
 print("done")
