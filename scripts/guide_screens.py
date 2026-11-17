@@ -51,6 +51,124 @@ def shot(name, tab, crop=None):
 
 T = {"summary": 0, "dims": 1, "patterns": 2, "swr": 3, "geo": 4, "surf": 5, "matching": 6, "bands": 7, "notes": 8}
 
+
+# ---- Wire Editor (v1.6.0) -----------------------------------------------------------------------
+def editor_shots():
+    from antennacalc.custom import CLoad, CSource, CDim, Drawing
+    from antennacalc.ui.wire_editor import LoadDialog
+
+    def setup(i):
+        i.band.setCurrentText("40 m (7.0-7.3 MHz)")
+        i.gain_on.setChecked(False); i.size_on.setChecked(False)
+    w.inputs.select("custom")
+    setup(w.inputs)
+    dr = Drawing(name="40 m shortened dipole")
+    a = dr.add_wire((-6, 0, 10), (0, 0, 10), "Left leg")
+    b = dr.add_wire((0, 0, 10), (6, 0, 10), "Right leg")
+    dr.sources.append(CSource(dr.new_id(), a.id, 1.0, label="S1"))
+    dr.loads.append(CLoad(dr.new_id(), a.id, 0.5, "series", r=3, l_uh=15.6, label="Coil L"))
+    dr.loads.append(CLoad(dr.new_id(), b.id, 0.5, "series", r=3, l_uh=15.6, label="Coil R"))
+    dr.dims.append(CDim(dr.new_id(), [a.id, 0], [b.id, 1], 0.6, "Span"))
+    ed = w.editor
+    ed.set_drawing(dr.to_dict())
+    ed.grid.setCurrentIndex(ed.grid.findData(1.0))
+    w.tabs.setCurrentWidget(w.editor_page)
+    app.processEvents()
+    ed.canvas.fit()
+    ed.select(dr.loads[0].id)
+    ed.side.setCurrentWidget(ed.t_wires)
+    app.processEvents()
+    pm = w.grab()
+    pm.copy(385, 20, pm.width() - 385, pm.height() - 40).save(os.path.join(OUT, "19_editor.png"))
+    print("wrote 19_editor.png")
+    ed.side.setCurrentWidget(ed.t_load)
+    app.processEvents()
+    pm = ed.side.grab()
+    pm.copy(0, 0, pm.width(), min(pm.height(), 130)).save(os.path.join(OUT, "19c_editor_loads.png"))
+    print("wrote 19c_editor_loads.png")
+    dlg = LoadDialog(dr.loads[0], a.length(), w)
+    dlg.show(); app.processEvents()
+    dlg.grab().save(os.path.join(OUT, "19b_load_dialog.png"))
+    dlg.close()
+    print("wrote 19b_load_dialog.png")
+    # rubber band while drawing a wire, in a fresh empty drawing
+    ed.set_drawing({"name": "Drawing", "wires": []})
+    ed.grid.setCurrentIndex(ed.grid.findData(0.5))
+    cv = ed.canvas
+    from PySide6.QtCore import QPointF
+    cv.k = 34.0; cv.off = QPointF(cv.width() / 2, cv.height() - 70); cv._fitted = True
+    ed.drawing.add_wire((-5, 0, 6), (0, 0, 9), "W1")
+    ed.refresh()
+    ed.set_tool("wire")
+    import numpy as np
+    cv.wire_start = np.array([0.0, 0, 9]); cv.cursor3 = np.array([5.0, 0, 6])
+    app.processEvents()
+    cv.grab().save(os.path.join(OUT, "19d_drawing.png"))
+    print("wrote 19d_drawing.png")
+    ed.set_tool("select")
+    # analyse the shortened dipole
+    ed.set_drawing(dr.to_dict())
+    spec, req, ex, basis = w.inputs.requirements()
+    ex["drawing"] = ed.drawing.to_dict()
+    wk = DesignWorker(spec, req, ex, basis)
+    wk.finished_ok.connect(lambda r, e: w._done(r, e))
+    wk.failed.connect(lambda m: print("FAILED", m))
+    wk.run()
+    app.processEvents()
+    shot("19e_editor_summary.png", T["summary"])
+    shot("19f_editor_swr.png", T["swr"])
+
+
+def feed_shots():
+    from antennacalc.custom import CSource, Drawing
+    from PySide6.QtWidgets import QScrollArea
+    ip = w.inputs
+    ip.select("custom")
+    ip.band.setCurrentText("40 m (7.0-7.3 MHz)")
+    ip.gain_on.setChecked(False); ip.size_on.setChecked(False)
+    dr = Drawing(name="40 m doublet, 2 x 20 m")
+    a = dr.add_wire((-20, 0, 10), (0, 0, 10), "Left"); dr.add_wire((0, 0, 10), (20, 0, 10), "Right")
+    dr.sources.append(CSource(dr.new_id(), a.id, 1.0, label="Feed"))
+    w.editor.set_drawing(dr.to_dict())
+    ip.feeder.setCurrentIndex(ip.feeder.findData("ladder450")); ip.feeder_len.setValue(20)
+    ip.balun_type.setCurrentIndex(ip.balun_type.findData("current"))
+    ip.ratio.setCurrentIndex(ip.ratio.findData(9.0)); ip.balun_loss.setValue(0.3)
+    ip.coax.setCurrentIndex(ip.coax.findData("rg213")); ip.coax_len.setValue(10)
+    ip.tuner.setCurrentIndex(ip.tuner.findData("rig10"))
+    spec, req, ex, basis = ip.requirements()
+    ex["drawing"] = w.editor.drawing.to_dict()
+    wk = DesignWorker(spec, req, ex, basis)
+    wk.finished_ok.connect(lambda r, e: w._done(r, e))
+    wk.failed.connect(lambda m: print("FAILED", m))
+    wk.run()
+    app.processEvents()
+    sa = ip.findChild(QScrollArea)
+    sa.ensureWidgetVisible(ip.cm_grounded, 10, 10)
+    app.processEvents()
+    top = ip.feeder.mapTo(ip, ip.feeder.rect().topLeft()).y() - 40
+    bot = ip.cm_grounded.mapTo(ip, ip.cm_grounded.rect().bottomLeft()).y() + 8
+    ip.grab().copy(0, max(top, 0), ip.width() - 22, bot - max(top, 0)).save(os.path.join(OUT, "20_feed_panel.png"))
+    print("wrote 20_feed_panel.png")
+    w.tabs.setCurrentWidget(w.matching)
+    app.processEvents()
+    pm = w.grab()
+    pm.copy(w.matching.mapTo(w, w.matching.rect().topLeft()).x(), 80, pm.width() - 420, 520).save(os.path.join(OUT, "20b_feed_system.png"))
+    print("wrote 20b_feed_system.png")
+    w.tabs.setCurrentIndex(T["geo"])
+    w.geo.set_view(-55, 20)
+    app.processEvents()
+    w.geo.grab().save(os.path.join(OUT, "20c_feed_geometry.png"))
+    print("wrote 20c_feed_geometry.png")
+    ip.feeder.setCurrentIndex(0); ip.balun_loss.setValue(0.0); ip.tuner.setCurrentIndex(0)
+
+
+if "--editor-only" in sys.argv:
+    editor_shots()
+    sys.exit(0)
+if "--feed-only" in sys.argv:
+    feed_shots()
+    sys.exit(0)
+
 design("dipole")
 shot("01_main.png", T["summary"])
 
@@ -168,4 +286,6 @@ def delta_down(i):
 design("delta", delta_down)
 w.geo.set_view(35, 25)
 shot("18c_delta_down_geo.png", T["geo"])
+editor_shots()
+feed_shots()
 print("done")

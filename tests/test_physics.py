@@ -310,3 +310,166 @@ def test_delta_loop_nec_deck_round_trips(over):
     z = solve(Model(st, 1.0), req.f_mhz * 1e6).zin[0]
     z0 = res.metrics["z_ant"]
     assert abs(z - z0) / abs(z0) < 0.03
+
+
+# --------------------------------------------------------------------------- Wire Editor (custom.py)
+def _custom(dr, ground="free", tune="none"):
+    from antennacalc.mom import Ground
+    spec = REGISTRY["custom"]
+    req = Requirements(f_mhz=14.15, f_lo=14.0, f_hi=14.35,
+                       ground=Ground(ground, 0.005, 13.0) if ground != "free" else Ground("free"))
+    ex = {"drawing": dr.to_dict(), "tune": tune}
+    sc = engine.tune(spec, req, ex, {})
+    return engine.evaluate(spec, req, ex, sc, do_sweep=False), sc
+
+
+def test_custom_drawn_dipole_matches_builtin():
+    from antennacalc.custom import template
+    res, sc = _custom(template("dipole", 299.792458 / 14.15), tune="scale")
+    z = res.metrics["z_ant"]
+    assert 65 < z.real < 80 and abs(z.imag) < 2
+    assert abs(res.metrics["gain_dbi"] - 2.1) < 0.2
+
+
+def test_custom_split_and_loads():
+    from antennacalc.custom import CLoad, Drawing, CSource, template
+    dr = template("dipole", 299.792458 / 14.15)
+    w = dr.wires[0]
+    a, b = dr.split_wire(w.id, 0.3)
+    assert dr.sources[0].wire == b.id and abs(dr.sources[0].at - (0.2 / 0.7)) < 1e-9
+    assert abs(a.length() + b.length() - 2 * 0.2375 * 299.792458 / 14.15) < 1e-6
+    # a parallel L-C trap resonant at the design frequency acts as an insulator
+    lh = 5.0
+    c = 1 / ((2 * math.pi * 14.15e6) ** 2 * lh * 1e-6) * 1e12
+    dr.loads.append(CLoad(dr.new_id(), a.id, 0.5, "parallel", r=0.0, l_uh=lh, c_pf=c))
+    res, _ = _custom(dr)
+    assert np.isfinite(res.metrics["gain_dbi"])
+    assert res.design.structure.loads
+
+
+def test_custom_elevated_ground_plane_feeds_whole_junction():
+    from antennacalc.custom import template
+    res, _ = _custom(template("gp", 299.792458 / 14.15), ground="real", tune="scale")
+    assert 35 < res.metrics["z_ant"].real < 65
+
+
+# --------------------------------------------------------------------------- feed system (feed line, balun, coax, tuner)
+def test_line_loss_matched_equals_datasheet_and_rises_with_swr():
+    from antennacalc.design import line_section
+    spec = (450.0, 0.91, 0.5, 30.0)
+    _, matched = line_section(450.0, spec, 7.1)
+    assert abs(matched - 0.5 * math.sqrt(7.1 / 100) * 0.3) < 1e-6
+    _, high = line_section(4500.0, spec, 7.1)
+    assert high > 3 * matched
+    _, coax = line_section(4500.0, (50.0, 0.66, 8.6, 30.0), 7.1)
+    assert coax > 8.0                       # the classic "coax at high SWR" loss
+
+
+def test_feed_system_ladder_balun_coax_tuner():
+    from antennacalc.custom import Drawing, CSource
+    from antennacalc.mom import Ground
+    dr = Drawing()
+    a = dr.add_wire((-20, 0, 10), (0, 0, 10)); dr.add_wire((0, 0, 10), (20, 0, 10))
+    dr.sources.append(CSource(dr.new_id(), a.id, 1.0))
+    spec = REGISTRY["custom"]
+    base = dict(f_mhz=7.1, f_lo=7.0, f_hi=7.3, ground=Ground("real", 0.005, 13.0), coax_key="rg213")
+    direct = engine.evaluate(spec, Requirements(**base, coax_len=30, tuner="wide"), {"drawing": dr.to_dict()}, {}, do_sweep=False)
+    ladder = engine.evaluate(spec, Requirements(**base, feeder_key="ladder450", feeder_len=20, ratio=9.0, coax_len=10, tuner="rig10"),
+                             {"drawing": dr.to_dict()}, {}, do_sweep=False)
+    md, ml = direct.metrics, ladder.metrics
+    assert md["sys_loss_db"] > 6 and ml["sys_loss_db"] < md["sys_loss_db"] / 2
+    names = [st[0] for st in ml["stages"]]
+    assert names[0] == "Antenna terminals" and "Ladder line" in names[1] and "9:1" in names[2] and "RG-213" in names[3]
+    assert abs(sum(st[3] for st in ml["stages"]) - ml["sys_loss_db"]) < 1e-9
+    assert ml["tuner_range"] == 10.0
+
+
+def test_tuner_loss_l_network_matches_theory_and_t_network_is_worse_into_low_z():
+    from antennacalc.design import t_tuner_loss, tuner_loss
+    # L network: power lost ~ loaded Q / inductor Q, with loaded Q = sqrt(Rhigh/Rlow - 1)
+    for r in (500.0, 5.0):
+        ql = math.sqrt(10 - 1)
+        expect = -10 * math.log10(1 - ql / 120)
+        assert abs(tuner_loss(complex(r, 0), 50, 7.1, 120)[0] - expect) < 0.02
+    assert tuner_loss(50 + 0j, 50, 7.1, 120)[0] == 0.0
+    # higher SWR -> more loss; lower Q -> more loss
+    assert tuner_loss(2500 + 0j, 50, 7.1, 120)[0] > tuner_loss(500 + 0j, 50, 7.1, 120)[0]
+    assert tuner_loss(500 + 0j, 50, 7.1, 60)[0] > tuner_loss(500 + 0j, 50, 7.1, 120)[0]
+    # T network at its best setting: never better than the L network, much worse into low impedance at low frequency
+    for z in (500 + 0j, 5 + 0j, 20 + 80j):
+        assert t_tuner_loss(z, 50, 7.1, 120) >= tuner_loss(z, 50, 7.1, 120)[0] - 1e-6
+    assert t_tuner_loss(5 + 0j, 50, 3.6, 120) > 5 * tuner_loss(5 + 0j, 50, 3.6, 120)[0]
+
+
+# --------------------------------------------------------------------------- coax common-mode current (cm.py)
+def _cm(key, ex, **kw):
+    from antennacalc.mom import Ground
+    spec = REGISTRY[key]
+    req = Requirements(ground=Ground("real", 0.005, 13.0), power_w=100, cm_model=True, **kw)
+    return engine.evaluate(spec, req, ex, {}, do_sweep=False).metrics
+
+
+def test_choke_reduces_dipole_common_mode_and_matches_hand_estimate():
+    direct = _cm("dipole", {"shape": "flat"}, balun_type="unun", coax_len=15)
+    choke = _cm("dipole", {"shape": "flat"}, balun_type="current", choke_ohm=5000, coax_len=15)
+    assert direct["cm_mode"] == "feedpoint"
+    assert -30 < direct["cm_ratio_db"] < -10
+    assert choke["cm_ratio_db"] < direct["cm_ratio_db"] - 6
+    # at the balun the choke carries about (V/2) / Zcm
+    z = choke["z_ant"]
+    i_feed = choke["cm_i_feed"]
+    expect = 0.5 * i_feed * abs(z) / 5000
+    assert 0.5 * expect < choke["cm_i_balun"] < 2.0 * expect
+    assert abs(choke["z_ant"] - direct["z_ant"]) < 5                  # the coax barely changes a choked dipole
+
+
+def test_common_mode_with_ladder_line_leaves_main_model_untouched():
+    from antennacalc.custom import CLoad, CSource, Drawing
+    dr = Drawing()
+    a = dr.add_wire((-20, 0, 10), (0, 0, 10)); b = dr.add_wire((0, 0, 10), (20, 0, 10))
+    dr.sources.append(CSource(dr.new_id(), a.id, 1.0))
+    dr.loads.append(CLoad(dr.new_id(), b.id, 0.5, "series", r=1, l_uh=1))
+    base = dict(f_mhz=7.1, f_lo=7.0, f_hi=7.3, feeder_key="ladder450", feeder_len=20, ratio=9.0, coax_len=10)
+    on = _cm("custom", {"drawing": dr.to_dict()}, balun_type="current", **base)
+    from antennacalc.mom import Ground
+    off = engine.evaluate(REGISTRY["custom"], Requirements(ground=Ground("real", 0.005, 13.0), **base),
+                          {"drawing": dr.to_dict()}, {}, do_sweep=False).metrics
+    assert on["cm_mode"] == "feedline" and math.isfinite(on["cm_ratio_db"])
+    assert abs(on["z_ant"] - off["z_ant"]) < 1e-6                       # the estimate is separate from the main solution
+
+
+def test_default_balun_type():
+    from antennacalc.cm import default_balun_type
+    assert default_balun_type(REGISTRY["efhw"]) == "unun"
+    assert default_balun_type(REGISTRY["dipole"]) == "current"
+
+
+def test_extra_coax_choke_down_the_line():
+    one = _cm("dipole", {"shape": "flat"}, balun_type="current", choke_ohm=2000, coax_len=15)
+    two = _cm("dipole", {"shape": "flat"}, balun_type="current", choke_ohm=2000, coax_len=15, choke2_ohm=2000, choke2_dist=13)
+    assert "cm_i_beyond" in two and two["cm_i_beyond"] < 0.5 * one["cm_i_max"]
+    assert two["cm_i_radio"] < 0.5 * one["cm_i_radio"]
+    far = _cm("dipole", {"shape": "flat"}, balun_type="current", choke_ohm=2000, coax_len=15, choke2_ohm=2000, choke2_dist=40)
+    assert "cm_i_beyond" not in far and "beyond the end" in far.get("cm_note", "")
+
+
+def test_coax_route_follows_user_direction_heights_and_lengths():
+    from antennacalc import cm
+    from antennacalc.custom import CSource, Drawing, build_structure
+    from antennacalc.mom import Ground, Structure
+    dr = Drawing()
+    a = dr.add_wire((-20, 0, 10), (0, 0, 10)); dr.add_wire((0, 0, 10), (20, 0, 10))
+    dr.sources.append(CSource(dr.new_id(), a.id, 1.0))
+    st = Structure(ground=Ground("real", 0.005, 13.0))
+    req = Requirements(f_mhz=7.1, coax_len=12, coax_dir=45, coax_height=0.5, feeder_bottom=3)
+    build_structure(dr, st, req)
+    pl = cm.plan(st, np.array([0, 0, 10.0]), req, (450, 0.91, 0.5, 20))
+    seglen = lambda P: sum(np.linalg.norm(np.subtract(P[i + 1], P[i])) for i in range(len(P) - 1))
+    assert abs(seglen(pl["feedline"]) - 20) < 1e-9 and abs(pl["feedline"][1][2] - 3) < 1e-9
+    assert abs(seglen(pl["coax"][:-1]) - 12) < 1e-9 and abs(pl["coax"][2][2] - 0.5) < 1e-9
+    d = pl["coax"][2] - pl["coax"][1]
+    assert abs(math.degrees(math.atan2(d[1], d[0])) - 45) < 1e-6
+    assert pl["coax"][-1][2] == 0.0                                    # grounded at the radio
+    auto = cm.plan(st, np.array([0, 0, 10.0]), Requirements(f_mhz=7.1, coax_len=12), None)
+    d = auto["coax"][2] - auto["coax"][1]
+    assert abs(d[0]) < 1e-9                                            # auto: at right angles to an X-directed antenna

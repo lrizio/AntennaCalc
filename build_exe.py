@@ -20,6 +20,7 @@ def main():
            "--distpath", BUILD, "--workpath", work, "--specpath", work,
            "--add-data", f"{os.path.join(ROOT, 'icon.ico')};.",
            "--collect-submodules", "antennacalc",
+           "--collect-submodules", "scipy._external",      # scipy >= 1.18 array-api shims, missed by the hook
            "--exclude-module", "matplotlib", "--exclude-module", "pytest", "--exclude-module", "tkinter",
            "--exclude-module", "PySide6.QtWebEngineCore", "--exclude-module", "PySide6.QtWebEngineWidgets",
            "--exclude-module", "PySide6.Qt3DCore", "--exclude-module", "PySide6.QtQuick",
@@ -30,7 +31,10 @@ def main():
     shutil.rmtree(work, ignore_errors=True)
     print("built", os.path.join(BUILD, "AntennaCalc.exe"))
     if "--shortcut" in sys.argv:
-        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        # the real Desktop folder (it is often redirected, e.g. to OneDrive)
+        desktop = subprocess.check_output(["powershell", "-NoProfile", "-Command",
+                                           "[Environment]::GetFolderPath('Desktop')"], text=True).strip()
+        desktop = desktop or os.path.join(os.path.expanduser("~"), "Desktop")
         lnk = os.path.join(desktop, "AntennaCalc.lnk")
         ps = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
               f"$s.TargetPath='{os.path.join(BUILD, 'AntennaCalc.exe')}';$s.WorkingDirectory='{BUILD}';"

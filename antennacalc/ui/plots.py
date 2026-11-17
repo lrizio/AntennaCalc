@@ -377,22 +377,32 @@ class GeometryView(QWidget):
         self._drag = None
         self.setMinimumSize(300, 300)
         self.note = ""
+        self.feed = None     # feed-system layout (cm.feed_layout) drawn over the antenna
+
+    def set_feed(self, layout):
+        self.feed = layout
+        self.update()
 
     def set_structure(self, st, note: str = ""):
         self.wires = []
         self.sources = []
         self.loads = []
+        self.feed = None
         self.note = note
         if st is None:
             self.update()
             return
         self.ground = st.ground.kind != "free"
         for w in st.wires:
+            if (w.name or "").startswith("Coax shield"):       # drawn as part of the feed system instead
+                continue
             self.wires.append((np.array(w.p0, float), np.array(w.p1, float), w.name or ""))
         for s in st.sources:
             w = st.wires[s.wire]
             self.sources.append(np.array(w.p0) + (np.array(w.p1) - np.array(w.p0)) * s.at)
         for l in st.loads:
+            if l.label in ("Balun common-mode impedance", "Coax choke"):
+                continue
             w = st.wires[l.wire]
             self.loads.append(np.array(w.p0) + (np.array(w.p1) - np.array(w.p0)) * l.at)
         self.update()

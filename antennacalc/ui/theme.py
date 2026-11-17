@@ -125,6 +125,9 @@ def stylesheet(t: Theme) -> str:
     QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed, QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {{ background: {t.accent_edge}; }}
     QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({ar["up"]}); width: 10px; height: 10px; }}
     QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({ar["down"]}); width: 10px; height: 10px; }}
+    QAbstractSpinBox[nobuttons="true"] {{ padding-right: 4px; }}
+    QAbstractSpinBox[nobuttons="true"]::up-button, QAbstractSpinBox[nobuttons="true"]::down-button {{ width: 0px; border: 0; }}
+    QAbstractSpinBox[nobuttons="true"]::up-arrow, QAbstractSpinBox[nobuttons="true"]::down-arrow {{ image: none; width: 0px; }}
     QComboBox QAbstractItemView {{ background: {t.panel}; selection-background-color: {t.accent}; border: 1px solid {t.edge}; }}
     QCheckBox {{ spacing: 6px; }}
     QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid {t.edge}; border-radius: 3px; background: {t.panel}; }}

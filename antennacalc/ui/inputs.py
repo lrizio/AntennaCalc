@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout
 from .. import models  # noqa: F401  (registers the antenna models)
 from ..common import (BANDS, BAND_BY_LABEL, COAX, COAX_LABELS, DIAMETERS, DIAM_BY_LABEL, GROUNDS, GROUND_BY_LABEL,
                       MATERIALS, TRANSFORMERS)
-from ..design import CATEGORIES, REGISTRY, Requirements, Spec, specs_in
+from ..cm import BALUN_TYPES, default_balun_type
+from ..design import CATEGORIES, REGISTRY, TUNERS, Requirements, Spec, specs_in
 
 CATEGORY_ORDER = ["HF wire antennas", "Vertical antennas", "Directional beams", "Compact antennas",
                   "VHF/UHF/satellite antennas", "Microwave antennas", "Receive-only antennas"]
@@ -26,7 +27,9 @@ def _dspin(lo, hi, val, step=0.1, dec=2, suffix=""):
     w.setKeyboardTracking(False)
     if suffix:
         w.setSuffix(suffix)
-    w.setButtonSymbols(QDoubleSpinBox.NoButtons)
+    # hide the arrows with the style (theme.py) instead of NoButtons: with NoButtons and a style sheet,
+    # Qt 6.12 shrinks the text field to nothing and the value disappears
+    w.setProperty("nobuttons", True)
     return w
 
 
@@ -145,23 +148,113 @@ class InputPanel(QWidget):
 
         # ---- feed
         section("Feed system")
+        hint = QLabel("Antenna, then feed line, balun, coax and tuner, as connected.")
+        hint.setObjectName("dim"); hint.setWordWrap(True)
+        lay.addWidget(hint)
+        self.feeder = QComboBox()
+        self.feeder.addItem("Antenna's own (usually none)", "model")
+        self.feeder.addItem("None (balun at the feedpoint)", "none")
+        for k in ("ladder450", "twin300", "open600"):
+            self.feeder.addItem(COAX[k][0], k)
+        for lab, k in COAX_LABELS:
+            if k not in ("none", "ladder450", "twin300", "open600"):
+                self.feeder.addItem(lab, k)
+        self.feeder.setToolTip("The line from the antenna feedpoint down to the balun (e.g. 450 ohm ladder line). "
+                               "'Antenna's own' keeps the feeder the antenna type defines (doublet / G5RV, Zepp), otherwise none.")
+        self.feeder_len = _dspin(0.0, 1000, 15.0, 1, 1, " m")
+        self.feeder.currentIndexChanged.connect(self._feeder_changed)
+        self.balun_type = QComboBox()
+        for lab, k in BALUN_TYPES:
+            self.balun_type.addItem(lab, k)
+        self.balun_type.setToolTip("What joins the feed line (or the antenna) to the coax. A current balun / choke stops common-mode "
+                                   "current on the coax; a voltage balun stops little; an unun (or coax straight on) stops none - "
+                                   "right for end-fed antennas, wrong onto ladder line or a dipole")
+        self.balun_type.currentIndexChanged.connect(self._balun_changed)
         self.ratio = QComboBox()
         for lab, v in TRANSFORMERS:
             self.ratio.addItem(lab, v)
+        self.ratio.setToolTip("Impedance ratio: n:1 means n x the system impedance on the antenna side (1:1 = no transformation)")
+        self.choke = _dspin(0, 100000, 2000, 100, 0, " ohm")
+        self.choke.setToolTip("Common-mode impedance of the current balun or choke at the operating frequency. Typical: 500-1000 ohm "
+                              "for a few ferrite beads, 2-5 kohm for a good ferrite toroid choke, 5-10 kohm or more for a well-designed one")
+        self.balun_loss = _dspin(0.0, 3.0, 0.0, 0.1, 1, " dB")
+        self.balun_loss.setSpecialValueText("ideal (0 dB)")
+        self.balun_loss.setToolTip("Insertion loss of the balun when matched. Core loss rises when the impedance it sees is high "
+                                   "(typical: 0.1-0.3 dB for a good current balun, 0.5-1 dB for a high-ratio unun)")
         self.coax = QComboBox()
         for lab, k in COAX_LABELS:
             self.coax.addItem(lab, k)
         self.coax.setCurrentIndex(3)
         self.coax_len = _dspin(0.0, 1000, 15.0, 1, 1, " m")
+        self.coax_dir = _dspin(-1, 359, -1, 15, 0, " deg")
+        self.coax_dir.setSpecialValueText("auto")
+        self.coax_dir.setToolTip("Direction the coax runs toward the radio, in degrees from the X axis toward Y "
+                                 "(0 = along +X, 90 = along +Y), as seen on the Geometry tab")
+        self.coax_height = _dspin(0.0, 100, 1.0, 0.5, 1, " m")
+        self.coax_height.setToolTip("Height of the coax's horizontal run to the radio (it first drops from the balun to this height)")
+        self.feeder_bottom = _dspin(0.0, 200, 2.0, 0.5, 1, " m")
+        self.feeder_bottom.setToolTip("Height the feed line comes down to before it turns toward the radio; the balun is at its end")
+        self.tuner = QComboBox()
+        for lab, k, _r in TUNERS:
+            self.tuner.addItem(lab, k)
+        self.tuner.setToolTip("An antenna tuner at the transmitter: the result checks whether it can match the SWR at the end of the coax "
+                              "and estimates its loss")
+        self.tuner.currentIndexChanged.connect(self._tuner_changed)
+        self.tuner_q = _dspin(0, 1000, 0, 10, 0, "")
+        self.tuner_q.setSpecialValueText("typical for the type")
+        self.tuner_q.setToolTip("Unloaded Q of the tuner's inductor, which sets its loss. Typical: 50-80 for the small toroids in a "
+                                "rig's internal ATU, 100-150 for a roller inductor, 200+ for a large air-wound coil")
         self.zref = _dspin(10, 1000, 50.0, 5, 0, " ohm")
-        self.lmatch = QCheckBox("Add automatic L-match at the feedpoint")
+        self.lmatch = QCheckBox("Add an automatic L-match")
         fl3 = QFormLayout(); fl3.setContentsMargins(0, 0, 0, 0)
-        fl3.addRow("Transformer", self.ratio)
-        fl3.addRow("Coax type", self.coax)
+        fl3.addRow("Feed line", self.feeder)
+        self.feeder_len_lbl = QLabel("Feed line length")
+        fl3.addRow(self.feeder_len_lbl, self.feeder_len)
+        fl3.addRow("Balun / unun", self.balun_type)
+        fl3.addRow("Ratio", self.ratio)
+        fl3.addRow("Balun loss", self.balun_loss)
+        self.choke_lbl = QLabel("Choke impedance")
+        fl3.addRow(self.choke_lbl, self.choke)
+        fl3.addRow("Coax to radio", self.coax)
         fl3.addRow("Coax length", self.coax_len)
+        fl3.addRow("Coax runs toward", self.coax_dir)
+        fl3.addRow("Coax run height", self.coax_height)
+        self.feeder_bottom_lbl = QLabel("Feed line comes down to")
+        fl3.addRow(self.feeder_bottom_lbl, self.feeder_bottom)
+        fl3.addRow("Tuner at radio", self.tuner)
+        self.tuner_q_lbl = QLabel("Tuner inductor Q")
+        fl3.addRow(self.tuner_q_lbl, self.tuner_q)
         fl3.addRow("System impedance", self.zref)
         lay.addLayout(fl3)
+        self.lmatch.setToolTip("An ideal L network that matches the antenna at the design frequency; it sits at the feedpoint, "
+                               "or at the bottom of the feed line when there is one")
         lay.addWidget(self.lmatch)
+        self.cm_model = QCheckBox("Estimate coax common-mode current")
+        self.cm_model.setToolTip("Adds the outside of the coax shield to the model, from the balun to the radio, and reports the "
+                                 "current on it and the heat in the choke")
+        self.cm_grounded = QCheckBox("Coax shield grounded at the radio")
+        self.cm_grounded.setChecked(True)
+        self.choke2 = _dspin(0, 100000, 0, 500, 0, " ohm")
+        self.choke2.setSpecialValueText("none")
+        self.choke2.setToolTip("An extra common-mode choke on the coax, besides the balun. Typical uses: on an EFHW, a choke a few "
+                               "metres down so the top of the coax is the counterpoise; on any antenna, a second choke where the "
+                               "coax enters the shack")
+        self.choke2_dist = _dspin(0, 1000, 3.0, 0.5, 1, " m")
+        self.choke2_dist.setToolTip("Distance of the extra choke down the coax from the balun")
+        cmf = QFormLayout(); cmf.setContentsMargins(0, 0, 0, 0)
+        self.choke2_lbl = QLabel("Extra coax choke")
+        self.choke2_dist_lbl = QLabel("Choke distance from balun")
+        cmf.addRow(self.choke2_lbl, self.choke2)
+        cmf.addRow(self.choke2_dist_lbl, self.choke2_dist)
+        self.cm_model.toggled.connect(self._cm_changed)
+        self.choke2.valueChanged.connect(self._cm_changed)
+        lay.addWidget(self.cm_model)
+        lay.addWidget(self.cm_grounded)
+        lay.addLayout(cmf)
+        self._cm_changed()
+        self._feeder_changed()
+        self._balun_changed()
+        self._tuner_changed()
 
         # ---- antenna specific options
         self.opt_box = QGroupBox("Antenna options")
@@ -273,11 +366,13 @@ class InputPanel(QWidget):
             lo, hi, f = CUSTOM_DEFAULTS[spec.key]
             self.flo.setValue(lo); self.fhi.setValue(hi); self.f0.setValue(f)
         self.ratio.setCurrentIndex(max(0, self.ratio.findData(spec.feed_ratio)))
+        self.balun_type.setCurrentIndex(max(0, self.balun_type.findData(default_balun_type(spec))))
         i = self.coax.findData(spec.feed_coax)
         if i >= 0:
             self.coax.setCurrentIndex(i)
         self.coax_len.setValue(spec.feed_len)
         self.lmatch.setChecked(spec.lmatch_default)
+        self.feeder.setCurrentIndex(0)
         self.size_hint.setText(spec.size_label + " (largest dimension)")
         self.gain_on.setEnabled(True)
         self.optimize.setVisible(spec.optimizable)
@@ -290,7 +385,46 @@ class InputPanel(QWidget):
         self.quality.setVisible(not spec.analytic)
         self._build_params(spec)
         self._shrinkable_combos()
+        self._fit_width()
         self.spec_changed.emit(spec)
+
+    def _fit_width(self):
+        """The form never scrolls sideways, so never let the panel be narrower than its contents
+        (plus the vertical scroll bar) - otherwise the right-hand edge of every field is cut off."""
+        sa = self.form_host.parentWidget().parentWidget()
+        self.form_host.layout().activate()
+        need = (self.form_host.minimumSizeHint().width() + sa.verticalScrollBar().sizeHint().width()
+                + 2 * sa.frameWidth() + 2)
+        self.setMinimumWidth(max(300, need))
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        self._fit_width()
+
+    def _cm_changed(self, *_):
+        on = self.cm_model.isChecked()
+        for w in (self.cm_grounded, self.choke2, self.choke2_lbl):
+            w.setEnabled(on)
+        d = on and self.choke2.value() > 0
+        self.choke2_dist.setEnabled(d)
+        self.choke2_dist_lbl.setEnabled(d)
+
+    def _balun_changed(self, *_):
+        on = self.balun_type.currentData() == "current"
+        self.choke.setEnabled(on)
+        self.choke_lbl.setEnabled(on)
+
+    def _tuner_changed(self, *_):
+        on = self.tuner.currentData() != "none"
+        self.tuner_q.setEnabled(on)
+        self.tuner_q_lbl.setEnabled(on)
+
+    def _feeder_changed(self, *_):
+        on = self.feeder.currentData() not in ("model", "none")
+        self.feeder_len.setEnabled(on)
+        self.feeder_len_lbl.setEnabled(on)
+        self.feeder_bottom.setEnabled(self.feeder.currentData() != "none")
+        self.feeder_bottom_lbl.setEnabled(self.feeder.currentData() != "none")
 
     def _shrinkable_combos(self):
         """Long item texts must not widen the panel past the scroll area (that clips every field under the scroll bar)."""
@@ -374,6 +508,12 @@ class InputPanel(QWidget):
             height=self.height.value(), ground=Ground(g.kind, g.sigma, g.eps_r), power_w=self.power.value(),
             zref=self.zref.value(), ratio=self.ratio.currentData(), coax_key=self.coax.currentData(),
             coax_len=self.coax_len.value(), lmatch=self.lmatch.isChecked(), spw=self.quality.currentData(),
+            feeder_key=self.feeder.currentData(), feeder_len=self.feeder_len.value(),
+            balun_loss_db=self.balun_loss.value(), tuner=self.tuner.currentData(), tuner_q=self.tuner_q.value(),
+            balun_type=self.balun_type.currentData(), choke_ohm=self.choke.value(),
+            cm_model=self.cm_model.isChecked(), cm_grounded=self.cm_grounded.isChecked(),
+            choke2_ohm=self.choke2.value(), choke2_dist=self.choke2_dist.value(),
+            coax_dir=self.coax_dir.value(), coax_height=self.coax_height.value(), feeder_bottom=self.feeder_bottom.value(),
             auto_tune=self.autotune.isChecked(), optimize=self.optimize.isChecked(),
             wide_sweep=bool(spec.wide_ok and self.wide.isChecked()),
             wide_lo=self.wide_lo.value(), wide_hi=self.wide_hi.value())
@@ -402,6 +542,12 @@ class InputPanel(QWidget):
              "ground": self.ground.currentText(), "power": self.power.value(), "ratio": self.ratio.currentIndex(),
              "coax": self.coax.currentIndex(), "coax_len": self.coax_len.value(), "zref": self.zref.value(),
              "lmatch": self.lmatch.isChecked(), "quality": self.quality.currentIndex(),
+             "feeder": self.feeder.currentData(), "feeder_len": self.feeder_len.value(),
+             "balun_loss": self.balun_loss.value(), "tuner": self.tuner.currentData(), "tuner_q": self.tuner_q.value(),
+             "balun_type": self.balun_type.currentData(), "choke": self.choke.value(),
+             "cm_model": self.cm_model.isChecked(), "cm_grounded": self.cm_grounded.isChecked(),
+             "choke2": self.choke2.value(), "choke2_dist": self.choke2_dist.value(),
+             "coax_dir": self.coax_dir.value(), "coax_height": self.coax_height.value(), "feeder_bottom": self.feeder_bottom.value(),
              "autotune": self.autotune.isChecked(), "optimize": self.optimize.isChecked(),
              "wide": self.wide.isChecked(), "wide_lo": self.wide_lo.value(), "wide_hi": self.wide_hi.value(), "params": {}}
         for k, (p, w) in self.param_widgets.items():
@@ -422,17 +568,25 @@ class InputPanel(QWidget):
         for w, k in ((self.f0, "f0"), (self.flo, "flo"), (self.fhi, "fhi"), (self.gain, "gain"), (self.size, "size"),
                      (self.diam_custom, "diam_custom"), (self.wall, "wall"), (self.height, "height"),
                      (self.power, "power"), (self.coax_len, "coax_len"), (self.zref, "zref"),
+                     (self.feeder_len, "feeder_len"), (self.balun_loss, "balun_loss"), (self.tuner_q, "tuner_q"),
+                     (self.choke, "choke"), (self.choke2, "choke2"), (self.choke2_dist, "choke2_dist"),
+                     (self.coax_dir, "coax_dir"), (self.coax_height, "coax_height"), (self.feeder_bottom, "feeder_bottom"),
                      (self.wide_lo, "wide_lo"), (self.wide_hi, "wide_hi")):
             if k in s:
                 w.setValue(s[k])
         for w, k in ((self.gain_on, "gain_on"), (self.size_on, "size_on"), (self.hollow_on, "hollow_on"),
                      (self.lmatch, "lmatch"), (self.autotune, "autotune"), (self.optimize, "optimize"),
-                     (self.wide, "wide")):
+                     (self.wide, "wide"), (self.cm_model, "cm_model"), (self.cm_grounded, "cm_grounded")):
             if k in s:
                 w.setChecked(bool(s[k]))
         for w, k in ((self.basis, "basis"), (self.ratio, "ratio"), (self.coax, "coax"), (self.quality, "quality")):
             if k in s:
                 w.setCurrentIndex(int(s[k]))
+        for w, k in ((self.feeder, "feeder"), (self.tuner, "tuner"), (self.balun_type, "balun_type")):
+            if k in s:
+                i = w.findData(s[k])
+                if i >= 0:
+                    w.setCurrentIndex(i)
         for w, k in ((self.mat, "mat"), (self.diam, "diam"), (self.ground, "ground")):
             if k in s:
                 i = w.findText(s[k])

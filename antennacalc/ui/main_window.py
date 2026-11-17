@@ -22,6 +22,7 @@ from .inputs import InputPanel
 from .plots import LinePlot, PolarPlot
 from .plots3d import GeometryView3D, PatternSurface
 from .titlebar import TitleBar
+from .wire_editor import WireEditor
 from .worker import DesignWorker
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -81,7 +82,7 @@ class MainWindow(QMainWindow):
         split = QSplitter(Qt.Horizontal)
         self.inputs = InputPanel()
         self.inputs.setMinimumWidth(300)
-        self.inputs.setMaximumWidth(480)
+        self.inputs.setMaximumWidth(720)
         split.addWidget(self.inputs)
 
         right = QWidget()
@@ -103,7 +104,9 @@ class MainWindow(QMainWindow):
         rl.addWidget(self.tabs, 1)
         split.addWidget(right)
         split.setStretchFactor(1, 1)
-        split.setSizes([380, 1180])
+        split.setSizes([400, 1160])
+        split.setChildrenCollapsible(False)
+        self.split = split
         self.setCentralWidget(split)
         # children inherit the window's resize cursor otherwise, leaving it stuck as a double arrow
         split.setCursor(Qt.ArrowCursor)
@@ -146,6 +149,9 @@ class MainWindow(QMainWindow):
         self._spec_changed(self.inputs.spec)
         self._apply_theme(self.settings.value("theme", "SHACK"))
         self.show_welcome()
+        st = self.settings.value("split")
+        if st is not None:
+            self.split.restoreState(st)
 
     # ------------------------------------------------------------------ tabs
     def _page(self, w, title):
@@ -155,6 +161,7 @@ class MainWindow(QMainWindow):
         sa.setFrameShape(QFrame.NoFrame)
         sa.setWidget(w)
         self.tabs.addTab(sa, title)
+        return sa
 
     def _build_tabs(self):
         self.summary = QTextBrowser()
@@ -279,6 +286,9 @@ class MainWindow(QMainWindow):
         self._page(bands, "Multi-band")
         self.notes = QTextBrowser()
         self.tabs.addTab(self.notes, "Notes")
+        self.editor = WireEditor(lam_fn=lambda: 299.792458 / max(self.inputs.f0.value(), 1e-3))
+        self.editor.analyse_requested.connect(self.analyse_drawing)
+        self.editor_page = self._page(self.editor, "Wire Editor")
 
     def _build_menu(self):
         mb = self.menuBar()
@@ -301,6 +311,8 @@ class MainWindow(QMainWindow):
         d = mb.addMenu("&Design")
         a = QAction("Design", self); a.setShortcut("F5"); a.triggered.connect(lambda: self.start_design(False)); d.addAction(a)
         a = QAction("Optimise (beams)", self); a.setShortcut("F6"); a.triggered.connect(self.start_optimise); d.addAction(a)
+        d.addSeparator()
+        a = QAction("Wire Editor (draw a custom antenna)", self); a.setShortcut("Ctrl+E"); a.triggered.connect(self.open_editor); d.addAction(a)
         v = mb.addMenu("&View")
         for name in theme.THEMES:
             a = QAction(f"{name.title()} theme", self)
@@ -319,12 +331,13 @@ class MainWindow(QMainWindow):
     def _apply_theme(self, name):
         t = theme.set_current(name)
         QApplication.instance().setStyleSheet(theme.stylesheet(t))
+        self.inputs._fit_width()          # the style changes widget sizes
         self.settings.setValue("theme", name)
         if self.result is not None:
             self.show_result(self.result)
         else:
             self.show_welcome()
-        for w in (self.az_plot, self.el_plot, self.swr_plot, self.z_plot, self.geo, self.surface):
+        for w in (self.az_plot, self.el_plot, self.swr_plot, self.z_plot, self.geo, self.surface, self.editor.canvas):
             w.update()
 
     def _css(self):
@@ -343,19 +356,40 @@ class MainWindow(QMainWindow):
         microwave and receive-only types.</li>
         <li>Wire antennas are simulated with a built-in thin-wire moment-method solver: real impedance, SWR sweep, gain, pattern and ground effects.</li>
         <li>Set a <b>target gain</b> and <b>size limit</b> and beams choose their element count for you.</li>
-        <li>Results: cut list, patterns, SWR, matching network values, multi-band table, and an NEC-2 deck export.</li></ul>
+        <li>Results: cut list, patterns, SWR, matching network values, multi-band table, and an NEC-2 deck export.</li>
+        <li><b>Wire Editor</b> (Ctrl+E): draw your own wire antenna, label and dimension the wires, add sources and loads
+        anywhere on them, then analyse it like any built-in design.</li></ul>
         <p class='dim'>Version {VERSION}.</p>""")
         for c in self.cards:
             c.set("-", "-", "text")
 
     def _spec_changed(self, spec):
         self.title_lbl.setText(spec.name if spec else "AntennaCalc")
+        if spec is not None and spec.key == "custom" and hasattr(self, "editor"):
+            self.tabs.setCurrentWidget(self.editor_page)
+
+    def open_editor(self):
+        if self.inputs.spec.key != "custom":
+            self.inputs.select("custom")
+        self.tabs.setCurrentWidget(self.editor_page)
+
+    def analyse_drawing(self):
+        if self.inputs.spec.key != "custom":
+            self.inputs.select("custom")
+        self.start_design(False)
 
     # ------------------------------------------------------------------ run
     def start_design(self, optimise_only=False):
         if self.worker is not None:
             return
         spec, req, ex, basis = self.inputs.requirements()
+        if spec.key == "custom":
+            ex["drawing"] = self.editor.drawing.to_dict()
+            probs = self.editor.drawing.problems(req.ground.kind != "free")
+            if probs:
+                self.tabs.setCurrentWidget(self.editor_page)
+                QMessageBox.information(self, "AntennaCalc", "The Wire Editor drawing is not ready:" + chr(10) * 2 + chr(10).join(probs))
+                return
         if optimise_only and not spec.optimizable:
             self.inputs.set_progress(0, "This antenna has no optimiser; it is designed directly.")
             return
@@ -399,6 +433,10 @@ class MainWindow(QMainWindow):
         self.result = res
         self.inputs.set_progress(1.0, "Done.")
         self.show_result(res)
+        if res.design.key == "custom":
+            self.editor.set_tuned_scale(res.scales.get("scale"))
+            if self.tabs.currentWidget() is self.editor_page:
+                self.tabs.setCurrentIndex(0)
 
     # ------------------------------------------------------------------ display
     def show_result(self, res):
@@ -418,6 +456,12 @@ class MainWindow(QMainWindow):
         self._update_surface(res)
         self.surface.set_structure(res.design.structure)
         self.geo.set_structure(d.structure, "Closed-form model: there is no wire geometry to draw." if d.structure is None else "")
+        if d.structure is not None and not d.rx_only:
+            from .. import cm
+            try:
+                self.geo.set_feed(cm.feed_layout(d, res.req, res.feed.line if res.feed else d.line))
+            except Exception:          # the drawing is a convenience: never let it stop the results showing
+                self.geo.set_feed(None)
         self.matching.setHtml(self._css() + report.matching_html(res))
         self._show_bands(res)
         self.notes.setHtml(self._css() + report.notes_html(res, spec))
@@ -560,7 +604,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         data = {"app": "AntennaCalc", "version": VERSION, "state": self.inputs.state(),
-                "scales": (self.result.scales if self.result else {})}
+                "scales": (self.result.scales if self.result else {}), "drawing": self.editor.drawing.to_dict()}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
         self.statusBar().showMessage(f"Saved {path}", 4000)
@@ -573,6 +617,8 @@ class MainWindow(QMainWindow):
             with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
             self.inputs.set_state(data["state"])
+            if data.get("drawing"):
+                self.editor.set_drawing(data["drawing"])
             self.inputs.set_progress(0, "Design loaded. Press DESIGN to calculate.")
         except Exception as e:
             QMessageBox.warning(self, "AntennaCalc", f"Could not open the design: {e}")
@@ -706,6 +752,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, ev):
         self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("split", self.split.saveState())
         if self.worker:
             self.worker.cancel()
             self.worker.wait(3000)

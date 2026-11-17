@@ -64,11 +64,26 @@ def requirement_checks(res: Result, spec: Spec) -> list:
     if d.mode == "currents":
         out.append(("Feed network (ideal)", True, "element currents are set by an ideal feed network; port impedances are listed below"))
     elif not d.rx_only:
-        out.append(("SWR at design frequency 2:1 or better", m["swr_f0"] <= 2.0, f"SWR {m['swr_f0']:.2f}:1 at {req.f_mhz:.4g} MHz"))
-        if m.get("band_ok") is not None and req.f_hi > req.f_lo and d.mode != "currents":
-            frac = m["band_ok"]
-            out.append(("SWR below 2:1 across the whole band", frac >= 0.999,
-                        f"{frac * 100:.0f}% of {req.f_lo:.4g}-{req.f_hi:.4g} MHz; worst {m['band_max_swr']:.1f}:1"))
+        if "cm_mode" in m:
+            where = "beyond the coax choke" if "cm_i_beyond" in m else "on the coax"
+            imax = m.get("cm_i_beyond", m["cm_i_max"])
+            out.append((f"Coax common-mode current {where} 20 dB below the feed current", m["cm_ratio_db"] <= -20.0,
+                        f"{m['cm_ratio_db']:+.0f} dB ({imax * 1000:.0f} mA rms at most)"))
+        rng = m.get("tuner_range") or 0.0
+        if rng > 0:
+            rtxt = f"{rng:g}:1" if math.isfinite(rng) else "any SWR"
+            out.append((f"Tuner can match at the design frequency ({rtxt})", m["swr_f0"] <= rng,
+                        f"SWR into the tuner {m['swr_f0']:.2f}:1 at {req.f_mhz:.4g} MHz"))
+            if m.get("band_max_swr") is not None and req.f_hi > req.f_lo:
+                out.append((f"Tuner can match across the whole band ({rtxt})", m["band_max_swr"] <= rng,
+                            f"worst {m['band_max_swr']:.1f}:1 in {req.f_lo:.4g}-{req.f_hi:.4g} MHz"))
+        else:
+            out.append(("SWR at design frequency 2:1 or better", m["swr_f0"] <= 2.0, f"SWR {m['swr_f0']:.2f}:1 at {req.f_mhz:.4g} MHz"))
+            if m.get("band_ok") is not None and req.f_hi > req.f_lo and d.mode != "currents":
+                frac = m["band_ok"]
+                out.append(("SWR below 2:1 across the whole band", frac >= 0.999,
+                            f"{frac * 100:.0f}% of {req.f_lo:.4g}-{req.f_hi:.4g} MHz; worst {m['band_max_swr']:.1f}:1"))
+
     else:
         out.append(("Receive-only design", True, "judge by directivity and front-to-rear, not gain"))
     return out
@@ -90,7 +105,11 @@ def metric_cards(res: Result, spec: Spec) -> list:
         cards.append(("DRIVEN PORTS", f"{len(res.port_info)}", "text"))
         cards.append(("PORT 1 IMPEDANCE", f"{m['z_ant'].real:.0f} {'+' if m['z_ant'].imag >= 0 else '-'} j{abs(m['z_ant'].imag):.0f}", "text"))
     elif not d.rx_only:
-        cards.append(("SWR @ F0", f"{m['swr_f0']:.2f} : 1", _swr_cls(m["swr_f0"])))
+        rng = m.get("tuner_range") or 0.0
+        if rng > 0:
+            cards.append(("SWR INTO TUNER", f"{m['swr_f0']:.2f} : 1", "good" if m["swr_f0"] <= rng else "bad"))
+        else:
+            cards.append(("SWR @ F0", f"{m['swr_f0']:.2f} : 1", _swr_cls(m["swr_f0"])))
         cards.append(("BANDWIDTH (SWR<2)", _bw_text(m.get("bw2")), "text"))
     cards.append(("TAKE-OFF ANGLE", f"{m['takeoff']:.0f} deg", "text"))
     cards.append(("EFFICIENCY", f"{m['efficiency'] * 100:.0f} %", "good" if m["efficiency"] > 0.7 else "warn" if m["efficiency"] > 0.3 else "bad"))
@@ -136,18 +155,45 @@ def summary_table(res: Result, spec: Spec) -> list:
         rows.append(("SWR note", "per-port impedances differ because of mutual coupling; the feed network must match each port"))
     elif not d.rx_only:
         rows.append(("Impedance at the coax input", _fz(m["z_rig"])))
-        rows.append((f"SWR on {req.zref:.0f} ohm at {req.f_mhz:.4g} MHz", f"{m['swr_f0']:.2f} : 1"))
+        rows.append((f"SWR on {req.zref:.0f} ohm at {req.f_mhz:.4g} MHz" + (" (into the tuner)" if m.get("tuner_range") else ""),
+                     f"{m['swr_f0']:.2f} : 1"))
+        if m.get("tuner_range"):
+            rng = m["tuner_range"]
+            ok = m["swr_f0"] <= rng
+            rows.append(("Tuner", ("can match it" if ok else "CANNOT match it")
+                         + (f" (range about {rng:g}:1)" if math.isfinite(rng) else " (wide range)")
+                         + ("; the transmitter then sees 1:1" if ok else "")))
+            if ok:
+                tl = m.get("tuner_loss_db", 0.0)
+                rows.append(("Tuner loss (estimate)", f"{tl:.2f} dB ({req.power_w * (1 - 10 ** (-tl / 10)):.1f} W at {req.power_w:.0f} W) "
+                             f"matching {m['swr_f0']:.1f}:1, inductor Q {m.get('tuner_q', 0):.0f}"))
         for key, lab in (("bw2", "SWR < 2:1 bandwidth"), ("bw15", "SWR < 1.5:1 bandwidth")):
             bw = m.get(key)
             if bw:
                 rows.append((lab, f"{bw[0]:.4f} - {bw[1]:.4f} MHz  ({_bw_text(bw)})"))
             else:
                 rows.append((lab, "not reached"))
-        if d.line:
-            rows.append(("SWR on the feeder line", f"{m['swr_line_f0']:.2f} : 1 (line impedance {d.line[0]:.0f} ohm)"))
-        rows.append(("Coax loss", f"{m['coax_loss_db']:.2f} dB at {req.f_mhz:.4g} MHz"))
-        if d.xfmr_loss_db > 0:
-            rows.append(("Transformer loss", f"{m['xfmr_loss_db']:.2f} dB at {req.f_mhz:.4g} MHz (rated {d.xfmr_loss_db:.1f} dB when matched)"))
+        fc = res.feed
+        if fc and fc.line:
+            rows.append(("SWR on the feed line", f"{m['swr_line_f0']:.2f} : 1 (line impedance {fc.line[0]:.0f} ohm)"))
+            rows.append(("Feed line loss", f"{m['line_loss_db']:.2f} dB at {req.f_mhz:.4g} MHz (including mismatch loss)"))
+        bl = engine.balun_loss_db(d, req)
+        if bl > 0:
+            rows.append(("Balun / transformer loss", f"{m['xfmr_loss_db']:.2f} dB at {req.f_mhz:.4g} MHz (rated {bl:.1f} dB when matched)"))
+        rows.append(("Coax loss", f"{m['coax_loss_db']:.2f} dB at {req.f_mhz:.4g} MHz (including mismatch loss)"))
+        if "cm_mode" in m:
+            rows.append(("Common-mode current on the coax", cm_text(m)))
+            if m.get("cm_p_choke", 0) > 0:
+                rows.append(("Heat in the balun / choke", f"{m['cm_p_choke']:.1f} W at {req.power_w:.0f} W"))
+            if "cm_p_choke2" in m:
+                rows.append(("Heat in the coax choke", f"{m['cm_p_choke2']:.1f} W at {req.power_w:.0f} W "
+                             f"({m['cm_i_choke2'] * 1000:.0f} mA through it)"))
+        elif m.get("cm_skip"):
+            rows.append(("Common-mode current on the coax", f"not modelled: {m['cm_skip']}"))
+        sl = m.get("sys_loss_db", 0.0)
+        frac = 10 ** (-sl / 10) if math.isfinite(sl) else 0.0
+        rows.append(("Total feed system loss", f"{sl:.2f} dB: {frac * req.power_w:.0f} W of {req.power_w:.0f} W reaches the antenna, "
+                     f"about {frac * m['efficiency'] * req.power_w:.0f} W is radiated"))
         rows.append((f"At {req.power_w:.0f} W: feedpoint current / voltage", f"{m['feed_i']:.2f} A rms / {m['feed_v']:.0f} V rms"))
     mk = mass_kg(res)
     if mk is not None:
@@ -160,9 +206,13 @@ def matching_html(res: Result) -> str:
     out = ["<h3>Feedpoint and matching</h3>"]
     z = m["z_ant"]
     out.append(f"<p>Impedance at the antenna terminals at {req.f_mhz:.4g} MHz: <b>{_fz(z)}</b>.</p>")
+    if m.get("stages"):
+        out.append(system_table_html(res))
+    out.append(cm_html(res))
     stages = []
-    if d.line:
-        stages.append(f"Feeder line {d.line[0]:.0f} ohm, {d.line[3]:.2f} m (velocity factor {d.line[1]:.2f}).")
+    line = fc.line if fc else d.line
+    if line:
+        stages.append(f"Feeder line {line[0]:.0f} ohm, {line[3]:.2f} m (velocity factor {line[1]:.2f}).")
     if fc and fc.lmatch_enabled and fc.lmatch:
         kind, se, sh = fc.lmatch
         stages.append(_lm_text(kind, se, sh, " (automatic L network, values fixed at the design frequency)"))
@@ -177,19 +227,93 @@ def matching_html(res: Result) -> str:
     out.append(f"<p>Impedance after matching, at the coax: <b>{_fz(zl)}</b> (SWR {m['swr_feed_f0']:.2f}:1 on {req.zref:.0f} ohm).</p>")
     # suggestion for a clean match at this frequency (from the antenna impedance after the feeder)
     zin = z
-    if d.line:
-        zin, _ = FeedChain.tline(z, d.line, req.f_mhz)
+    if line:
+        zin, _ = FeedChain.tline(z, line, req.f_mhz)
     sol = l_match(zin, req.zref * ratio, req.f_mhz)
     if sol and not (fc and fc.lmatch_enabled):
         kind, se, sh = sol
         out.append("<h3>Suggested L-network</h3>")
-        out.append("<p>A lossless L-network at the antenna end would give a perfect match at the centre frequency: " + _lm_text(kind, se, sh, "") + "</p>")
+        where = "at the bottom of the feed line" if line else "at the antenna end"
+        out.append(f"<p>A lossless L-network {where} would give a perfect match at the centre frequency: " + _lm_text(kind, se, sh, "") + "</p>")
     rr = z.real
     if rr > 0 and ratio == 1.0:
         out.append(f"<p>Nearest simple transformer: <b>{max(rr / req.zref, req.zref / max(rr, 1e-6)):.1f}:1</b> "
                    f"({'step-down' if rr > req.zref else 'step-up'}) &mdash; but a transformer does not cancel reactance.</p>")
-    out.append("<p class='dim'>L-network, transformer and coax are ideal components (coax loss is included).</p>")
+    out.append("<p class='dim'>The automatic L-network is ideal (lossless). The tuner loss is an estimate: the lowest-loss L network for "
+               "the impedance the tuner sees, with the inductor Q shown (capacitors Q 1000); a T-network tuner usually loses more, "
+               "especially into low impedances. Line losses are calculated at the actual SWR on each line; "
+               "the balun / transformer loss is the value you entered (or the antenna model's).</p>")
     return "".join(out)
+
+
+def cm_text(m: dict) -> str:
+    r = m["cm_ratio_db"]
+    verdict = ("good" if r <= -30 else "acceptable" if r <= -20 else "high - add or improve a choke")
+    if "cm_i_beyond" in m:
+        return (f"{m['cm_i_beyond'] * 1000:.0f} mA rms at most beyond the coax choke ({r:+.0f} dB relative to the "
+                f"{m['cm_i_feed']:.2f} A feed current: {verdict}); {m['cm_i_max'] * 1000:.0f} mA at most anywhere on the coax, "
+                f"{m['cm_i_radio'] * 1000:.0f} mA at the radio")
+    return (f"{m['cm_i_max'] * 1000:.0f} mA rms at most ({r:+.0f} dB relative to the {m['cm_i_feed']:.2f} A feed current: {verdict}); "
+            f"{m['cm_i_balun'] * 1000:.0f} mA at the balun, {m['cm_i_radio'] * 1000:.0f} mA at the radio")
+
+
+def cm_html(res: Result) -> str:
+    m, req = res.metrics, res.req
+    if "cm_mode" not in m:
+        if m.get("cm_skip"):
+            return f"<h3>Coax common-mode current</h3><p>Not modelled: {html.escape(m['cm_skip'])}.</p>"
+        return ""
+    how = ("The outside of the coax shield is part of the antenna model, from the balun at the feedpoint to the radio, joined "
+           "through the balun's common-mode impedance; the SWR, pattern and gain above include it."
+           if m["cm_mode"] == "feedpoint" else
+           f"The feed line is assumed balanced, so the coax is driven at the balun by half the voltage across it "
+           f"({m.get('cm_v', 0):.0f} V rms), against the feed line and antenna. Common-mode path impedance "
+           f"{_fz(m.get('cm_zpath', 0j))} plus the balun's common-mode impedance. This estimate does not change the main result.")
+    rows = [("Largest current on the coax", f"{m['cm_i_max'] * 1000:.0f} mA rms"),
+            ("At the balun / at the radio", f"{m['cm_i_balun'] * 1000:.0f} mA / {m['cm_i_radio'] * 1000:.0f} mA"),
+            ("Feed (differential) current", f"{m['cm_i_feed']:.2f} A rms")]
+    if "cm_i_beyond" in m:
+        rows += [(f"Through the coax choke ({req.choke2_ohm:.0f} ohm, {req.choke2_dist:g} m down)", f"{m['cm_i_choke2'] * 1000:.0f} mA rms"),
+                 ("Largest current beyond the coax choke", f"{m['cm_i_beyond'] * 1000:.0f} mA rms"),
+                 ("Beyond the choke, relative to feed", f"{m['cm_ratio_db']:+.1f} dB"),
+                 ("Heat in the coax choke", f"{m['cm_p_choke2']:.1f} W at {req.power_w:.0f} W")]
+    else:
+        rows += [("Common mode relative to feed", f"{m['cm_ratio_db']:+.1f} dB")]
+    rows += [("Heat in the balun / choke", f"{m.get('cm_p_choke', 0):.1f} W at {req.power_w:.0f} W")]
+    if m.get("cm_note"):
+        rows += [("Note", html.escape(m["cm_note"]))]
+    tips = ("<p class='dim'>Below about -30 dB is good, -20 to -30 dB is usually fine, above -20 dB the coax is part of the "
+            "antenna: RF in the shack, noise pickup and a distorted pattern are likely. A current balun or choke of a few kilohms "
+            "(resistive) is the cure; a voltage balun or unun gives little isolation. Heat in the choke shows when it is "
+            "working hard - ferrite chokes fail when they run hot.</p>")
+    return ("<h3>Coax common-mode current</h3><p>" + how + "</p><table>"
+            + "".join(f"<tr><th>{a}</th><td>{b}</td></tr>" for a, b in rows) + "</table>" + tips)
+
+
+def system_table_html(res: Result) -> str:
+    """The whole antenna system, transmitter first, with impedance, SWR and power lost in each part."""
+    req, m = res.req, res.metrics
+    stages = m.get("stages") or []
+    p = req.power_w
+    losses = [st[3] for st in stages]
+    rows = []
+    for k, (name, zz, sw, loss) in enumerate(stages):
+        nearer = sum(losses[k + 1:])          # stages between this one and the transmitter
+        pin = p * 10 ** (-nearer / 10) if math.isfinite(nearer) else 0.0
+        pout = pin * 10 ** (-loss / 10) if math.isfinite(loss) else 0.0
+        rows.append(f"<tr><td>{html.escape(name)}</td><td>{_fz(zz)}</td><td>{'' if sw is None else f'{sw:.2f} : 1'}</td>"
+                    f"<td>{'' if loss == 0 else f'{loss:.2f} dB'}</td><td>{'' if loss == 0 else f'{pin - pout:.1f} W'}</td></tr>")
+    tot = m.get("sys_loss_db", 0.0)
+    reach = p * 10 ** (-tot / 10) if math.isfinite(tot) else 0.0
+    total = (f"<tr><td colspan='3'><b>Total</b>: {reach:.0f} W of {p:.0f} W reaches the antenna; about "
+             f"{reach * m['efficiency']:.0f} W is radiated (antenna efficiency {m['efficiency'] * 100:.0f} %)</td>"
+             f"<td><b>{tot:.2f} dB</b></td><td><b>{p - reach:.1f} W</b></td></tr>")
+    return (f"<h3>The antenna system as connected, at {req.f_mhz:.4g} MHz</h3>"
+            "<p>Transmitter first, antenna last. <i>Impedance</i> is what you would measure at the transmitter end of each part, "
+            "looking toward the antenna; <i>SWR on it</i> is relative to that part's own impedance; losses include the extra loss "
+            "caused by the SWR on each line.</p>"
+            "<table><tr><th>Part</th><th>Impedance</th><th>SWR on it</th><th>Loss</th><th>Power lost</th></tr>"
+            + "".join(reversed(rows)) + total + "</table>")
 
 
 def _lm_text(kind, se, sh, tail):

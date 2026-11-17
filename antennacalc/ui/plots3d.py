@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPolygonF, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPolygonF, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import theme
@@ -33,6 +33,10 @@ class GeometryView3D(GeometryView):
             p.drawText(self.rect(), Qt.AlignCenter, self.note or "No wire geometry (closed-form model)")
             return
         pts = np.array([w[0] for w in self.wires] + [w[1] for w in self.wires])
+        fd = self.feed
+        if fd:
+            extra = list(fd["coax"]) + (list(fd["feedline"]) if fd.get("feedline") else []) + [fd["balun"]]
+            pts = np.vstack([pts, np.array(extra, float)])
         if self.ground:
             c0 = pts.mean(0)
             pts = np.vstack([pts, [[c0[0], c0[1], 0.0]]])
@@ -83,6 +87,8 @@ class GeometryView3D(GeometryView):
                 pen = QPen(colr); pen.setWidthF(width); pen.setCapStyle(Qt.RoundCap); p.setPen(pen)
                 off = QPointF(-0.9, -0.9) if width < 2 else QPointF(0, 0)
                 p.drawLine(q[0] + off, q[1] + off)
+        if fd:
+            self._paint_feed(p, t, fd, S)
         p.setPen(Qt.NoPen)
         for l in self.loads:
             q = S([l])[0]
@@ -101,8 +107,64 @@ class GeometryView3D(GeometryView):
             p.drawText(QPointF(ox + q[0] * 32 - 3, oy - q[1] * 32 + 4), nm)
         ext3 = pts.max(0) - pts.min(0)
         p.drawText(10, 18, f"span: x {ext3[0]:.2f} m   y {ext3[1]:.2f} m   z {ext3[2]:.2f} m    "
-                           f"({len(self.wires)} wires)   red = feed, amber = load")
+                           f"({len(self.wires)} wires)   red = feed, amber = load"
+                           + ("   |   dashed = feed line, grey = coax" if fd else ""))
         p.drawText(10, self.height() - 10, "drag to rotate, wheel to zoom, double-click to reset")
+
+
+    def _paint_feed(self, p, t, fd, S):
+        """Feed line, balun, coax, chokes, radio and ground connection."""
+        small = QFont("Segoe UI", 8)
+        p.setFont(small)
+
+        def poly(pts, pen):
+            q = S(pts)
+            p.setPen(pen)
+            for a, b in zip(q[:-1], q[1:]):
+                p.drawLine(a, b)
+            return q
+
+        fm = p.fontMetrics()
+
+        def tag(pt, text, col, dx=10, dy=-8):
+            """Label beside a point; a negative dx puts it to the left (right-aligned)."""
+            if not text:
+                return
+            p.setPen(QColor(col))
+            x = pt.x() + dx if dx >= 0 else pt.x() + dx - fm.horizontalAdvance(text)
+            p.drawText(QPointF(x, pt.y() + dy), text)
+
+        def longest_mid(q):
+            k = max(range(len(q) - 1), key=lambda i: (q[i + 1] - q[i]).manhattanLength())
+            return (q[k] + q[k + 1]) / 2
+        if fd.get("feedline") and len(fd["feedline"]) > 1:
+            pen = QPen(QColor(t.c2)); pen.setWidthF(2.2); pen.setStyle(Qt.DashLine); pen.setCapStyle(Qt.RoundCap)
+            q = poly(fd["feedline"], pen)
+            tag(longest_mid(q), fd.get("feedline_label", ""), t.c2, dx=-10, dy=4)
+        coax = fd["coax"]
+        if len(coax) > 1:
+            pen = QPen(QColor("#9aa4ae")); pen.setWidthF(3.4); pen.setCapStyle(Qt.RoundCap)
+            q = poly(coax, pen)
+            tag(longest_mid(q), fd.get("coax_label", ""), "#9aa4ae", dx=8, dy=16)
+            if fd.get("grounded"):                         # ground symbol at the radio
+                g = q[-1]
+                p.setPen(QPen(QColor(t.c3), 1.6))
+                for i, wdt in enumerate((9, 6, 3)):
+                    p.drawLine(QPointF(g.x() - wdt, g.y() + 3 + 3 * i), QPointF(g.x() + wdt, g.y() + 3 + 3 * i))
+            r = S([fd["radio"]])[0]
+            p.setPen(QPen(QColor(t.text), 1.2)); p.setBrush(QColor(t.panel))
+            p.drawRoundedRect(QRectF(r.x() - 9, r.y() - 7, 18, 14), 3, 3)
+            tag(r, fd.get("radio_label", ""), t.text, dx=13, dy=4)
+        if fd.get("choke2") is not None:
+            c = S([fd["choke2"]])[0]
+            p.setPen(QPen(QColor(t.c3), 2.2)); p.setBrush(Qt.NoBrush)
+            p.drawEllipse(c, 7, 7); p.drawEllipse(c, 3.5, 3.5)
+            tag(c, fd.get("choke2_label", ""), t.c3, dx=11, dy=4)
+        if fd.get("balun_label"):
+            bq = S([fd["balun"]])[0]
+            p.setPen(QPen(QColor(t.accent_edge), 1.4)); p.setBrush(QColor(t.accent))
+            p.drawRect(QRectF(bq.x() - 6, bq.y() - 6, 12, 12))
+            tag(bq, fd["balun_label"], t.accent_edge, dx=-10, dy=4)
 
 
 class PatternSurface(QWidget):

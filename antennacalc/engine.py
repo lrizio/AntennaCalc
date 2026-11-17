@@ -50,20 +50,53 @@ def terminal_z(design: Design, model: Model, f_mhz: float):
     return sol.zin[0], sol
 
 
+def feed_line(design: Design, req: Requirements):
+    """The antenna-side feed line actually used: the antenna model's own, or the one chosen on the input panel."""
+    from .common import COAX
+    key = getattr(req, "feeder_key", "model")
+    if key == "model" or key not in COAX and key != "none":
+        return design.line
+    if key == "none":
+        return None
+    c = COAX[key]
+    return (c[1], c[2], c[3], max(req.feeder_len, 0.0)) if req.feeder_len > 0 else None
+
+
+def balun_loss_db(design: Design, req: Requirements) -> float:
+    user = getattr(req, "balun_loss_db", 0.0)
+    return user if user > 0 else design.xfmr_loss_db
+
+
 def make_feed(design: Design, req: Requirements, zant_f0: complex | None = None) -> FeedChain:
     ratio = design.force_ratio if design.force_ratio else req.ratio
-    z0, vf, loss, _ = (50.0, 0.66, 8.6, 0.0)
     from .common import COAX
+    from .design import TUNER_Q, TUNER_RANGE, TUNER_TOPOLOGY, TUNERS
     c = COAX[req.coax_key]
     ln = req.coax_len if req.coax_key != "none" else 0.0
-    fc = FeedChain(line=design.line, ratio=ratio, coax=(c[1], c[2], c[3], ln), zref=req.zref)
-    if design.xfmr_loss_db > 0:
-        x = 1.0 - 10 ** (-design.xfmr_loss_db / 10.0)          # power fraction lost when the load is matched
+    line = feed_line(design, req)
+    fc = FeedChain(line=line, ratio=ratio, coax=(c[1], c[2], c[3], ln), zref=req.zref)
+    if line:
+        fk = getattr(req, "feeder_key", "model")
+        nm = COAX[fk][0] if fk in COAX else f"{line[0]:.0f} ohm feed line"
+        fc.line_name = f"{nm}, {line[3]:.1f} m"
+    fc.coax_name = f"{c[0]}, {ln:.1f} m"
+    from .cm import BALUN_TYPE_NAME
+    fc.balun_name = BALUN_TYPE_NAME.get(getattr(req, "balun_type", "current"), "Balun").split(" (")[0].split(" / ")[0]
+    tk = getattr(req, "tuner", "none")
+    fc.tuner_range = TUNER_RANGE.get(tk, 0.0)
+    fc.tuner_name = next((lab for lab, k, _ in TUNERS if k == tk), "Tuner")
+    uq = getattr(req, "tuner_q", 0.0)
+    fc.tuner_q = uq if uq > 0 else TUNER_Q.get(tk, 100.0)
+    fc.tuner_topology = TUNER_TOPOLOGY.get(tk, "L")
+    fc.tuner_name += f" ({fc.tuner_topology} network, inductor Q {fc.tuner_q:.0f})"
+    bl = balun_loss_db(design, req)
+    if bl > 0:
+        x = 1.0 - 10 ** (-bl / 10.0)          # power fraction lost when the load is matched
         fc.xfmr_g = (x / (1.0 - x)) / req.zref
     if req.lmatch and zant_f0 is not None:
         zin = zant_f0
-        if design.line:
-            zin, _ = FeedChain.tline(zin, design.line, req.f_mhz)
+        if line:
+            zin, _ = FeedChain.tline(zin, line, req.f_mhz)
         fc.lmatch_enabled = True
         fc.compute_lmatch(zin, req.f_mhz)
         if fc.lmatch is None:
@@ -482,6 +515,8 @@ class Result:
     swr_line: np.ndarray = None
     coax_loss: np.ndarray = None
     xfmr_loss: np.ndarray = None
+    line_loss: np.ndarray = None
+    total_loss: np.ndarray = None
     pattern: Pattern | None = None
     feed: FeedChain | None = None
     metrics: dict = field(default_factory=dict)
@@ -509,11 +544,20 @@ def sweep_freqs(design: Design, req: Requirements, n: int = 25) -> np.ndarray:
 
 def evaluate(spec: Spec, req: Requirements, ex: dict, scales: dict, progress=None, cancel=None,
              do_sweep: bool = True, do_bands: bool = True) -> Result:
+    from . import cm
     design = spec.builder(req, ex, scales)
     res = Result(design=design, req=req, scales=dict(scales), spec=spec)
     if design.analytic is not None:
         return _evaluate_analytic(spec, design, req, res, do_sweep)
+    cm_info = None
+    if getattr(req, "cm_model", False) and not design.rx_only and feed_line(design, req) is None:
+        cm_info = cm.attach_shield(design, req)
     model = build_model(design, req)
+    if cm_info and cm_info.get("mode") and not cm.check_model(cm_info, model, design.structure):
+        design = spec.builder(req, ex, scales)              # could not place the shield cleanly: analyse without it
+        res.design = design
+        cm_info = {"skip": "the coax could not be joined cleanly at this feedpoint"}
+        model = build_model(design, req)
     res.model = model
     if progress:
         progress(0.02, f"Solving at {req.f_mhz:.3f} MHz ({model.N} segments)")
@@ -546,6 +590,21 @@ def evaluate(spec: Spec, req: Requirements, ex: dict, scales: dict, progress=Non
         freqs = np.array([req.f_mhz]); za = np.array([z0])
     _fill_sweep(res, design, req, fc, freqs, za)
     res.metrics = summarize(res, z0)
+    if getattr(req, "cm_model", False) and not design.rx_only and design.imp_override is None:
+        m = res.metrics
+        sl = m.get("sys_loss_db", 0.0)
+        p_ant = req.power_w * 10 ** (-sl / 10) if math.isfinite(sl) else 0.0
+        if cm_info and cm_info.get("mode") == "feedpoint":
+            m.update(cm.results_feedpoint(cm_info, sol0, p_ant))
+        elif fc.line:
+            p_bal = p_ant * 10 ** (m.get("line_loss_db", 0.0) / 10)        # power at the balun's antenna side
+            z_bottom = fc.apply(z0, req.f_mhz)["zline_in"]
+            try:
+                m.update(cm.estimate_with_feedline(design, req, fc.line, z_bottom, p_bal, req.f_mhz, seg_len_for(req, design)))
+            except Exception as e:                                    # keep the main result if the estimate fails
+                m["cm_skip"] = f"the estimate failed ({e})"
+        else:
+            m["cm_skip"] = (cm_info or {}).get("skip", "not available for this antenna")
     if do_bands and design.multiband:
         res.bands = band_table(spec, design, req, model, fc, progress, cancel)
     if progress:
@@ -583,18 +642,20 @@ def _fill_sweep(res, design, req, fc, freqs, za):
     res.f = freqs
     res.zant = za
     zf = np.zeros(n, complex); zr = np.zeros(n, complex); cl = np.zeros(n); xl = np.zeros(n)
-    sl = np.zeros(n)
+    sl = np.zeros(n); fl = np.zeros(n); tl = np.zeros(n)
     for i, (f, z) in enumerate(zip(freqs, za)):
         if design.imp_override is not None:
             zf[i] = zr[i] = z
         else:
             o = fc.apply(z, f)
             zf[i], zr[i], cl[i], xl[i] = o["zfeed"], o["zrig"], o["coax_loss_db"], o["xfmr_loss_db"]
-        if design.line:
-            sl[i] = swr_from_z(z, design.line[0])
+            fl[i], tl[i] = o["line_loss_db"], o["total_loss_db"]
+        if fc.line:
+            sl[i] = swr_from_z(z, fc.line[0])
         else:
             sl[i] = swr_from_z(z, req.zref * (design.force_ratio or req.ratio))
     res.zfeed, res.zrig, res.coax_loss, res.xfmr_loss = zf, zr, cl, xl
+    res.line_loss, res.total_loss = fl, tl
     res.swr_feed = np.array([swr_from_z(z, req.zref) for z in zf])
     res.swr_rig = np.array([swr_from_z(z, req.zref) for z in zr])
     res.swr_line = sl
@@ -628,6 +689,13 @@ def summarize(res: Result, z0: complex) -> dict:
     m["swr_line_f0"] = float(res.swr_line[i0])
     m["coax_loss_db"] = float(res.coax_loss[i0]) if res.coax_loss is not None else 0.0
     m["xfmr_loss_db"] = float(res.xfmr_loss[i0]) if res.xfmr_loss is not None else 0.0
+    m["line_loss_db"] = float(res.line_loss[i0]) if res.line_loss is not None else 0.0
+    m["sys_loss_db"] = float(res.total_loss[i0]) if res.total_loss is not None else m["coax_loss_db"] + m["xfmr_loss_db"]
+    fc = res.feed
+    m["tuner_range"] = fc.tuner_range if fc else 0.0
+    m["tuner_q"] = fc.tuner_q if fc else 0.0
+    m["tuner_loss_db"] = fc.apply(z0, req.f_mhz)["tuner_loss_db"] if (fc and res.design.imp_override is None) else 0.0
+    m["stages"] = fc.apply(z0, req.f_mhz)["stages"] if (fc and res.design.imp_override is None) else []
     m["gain_dbi"] = p.peak_db
     m["gain_dbd"] = p.peak_db - 2.15
     m["directivity"] = p.directivity
